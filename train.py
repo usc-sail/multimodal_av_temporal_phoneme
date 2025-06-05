@@ -16,7 +16,6 @@ import cv2
 
 #Libraries needed for wav2vec2-lv-60-espeak-cv-ft
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
-from datasets import load_dataset
 
 class AV_Conformer(nn.Module):
     def __init__(self, modality='multimodal', feats='base', num_heads=4, num_layers=3):
@@ -249,6 +248,6 @@ for t in range(epochs):
             total_tokens = total_tokens + batch_length * 250
 
     avg_loss = total_loss / num_batches
-    print(f"Average test loss: {avg_loss:>7f}")
+    print(f"Average loss of testing dataset: {avg_loss:>7f}")
     token_error_rate = float(incorrect_tokens)/float(total_tokens)
     print(f"Token error rate on testing dataset: {token_error_rate:>7f}\n")
