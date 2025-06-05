@@ -186,9 +186,13 @@ for t in range(epochs):
         audio = batch["audio"].to(device) #Shape: [batch_size, num_channels, num_samples]
         tokens = batch["tokens"].to(device) #Shape: [batch_size, time_steps]
 
+        #Acquire audio features
         audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt").input_values.to(device)
         with torch.no_grad():
             audio_features = audio_features_model(audio_values[0], output_hidden_states=True).hidden_states[-1] #Shape: [batch_size, time_steps, 1024]
+        
+        #Acquire video features
+        
         log_probs = finalModel(audio_features, videos, 1024) #Shape: [batch_size, 250, 40]
         # Prepare input and target lengths (all sequences are length 250 in your case)
         input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)
@@ -226,9 +230,13 @@ for t in range(epochs):
             videos = batch["video"].to(device)
             audio = batch["audio"].to(device)
             tokens = batch["tokens"].to(device)
-        
+
+            #Acquire audio features
             audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt").input_values.to(device)
             audio_features = audio_features_model(audio_values[0], output_hidden_states=True).hidden_states[-1] #Shape: [batch_size, time_steps, 1024]
+            
+            #Acquire video features
+
             log_probs = finalModel(audio_features, videos, 1024) #Shape: [batch_size, 250, 40]
             
             # Prepare input and target lengths (all sequences are length 250 in your case)
