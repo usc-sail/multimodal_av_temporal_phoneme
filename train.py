@@ -251,4 +251,4 @@ for t in range(epochs):
     avg_loss = total_loss / num_batches
     print(f"Average test loss: {avg_loss:>7f}")
     token_error_rate = float(incorrect_tokens)/float(total_tokens)
-    print(f"Token error rate: {token_error_rate:>7f}\n")
+    print(f"Token error rate on testing dataset: {token_error_rate:>7f}\n")
