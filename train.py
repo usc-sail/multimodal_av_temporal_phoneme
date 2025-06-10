@@ -14,6 +14,7 @@ import sys
 import numpy as np
 import cv2
 from typing import Optional, Tuple
+import ignite
 
 #Libraries needed for wav2vec2-lv-60-espeak-cv-ft
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
@@ -337,8 +338,14 @@ class AV_Conformer(nn.Module):
             batch_first=True,
         )
 
+        #Define relu activation function
+        self.relu = nn.ReLU()
+
+        #MLP layer to analyze audio embeddings
+        self.mlp_layer = nn.Linear(1024, 392)
+
         # Final classification layer
-        self.classifier = nn.Linear(128, 40)
+        self.classifier = nn.Linear(98000, 10000)
 
     def forward(self, audio_features, video_features, feat_lengths):
     
@@ -354,14 +361,19 @@ class AV_Conformer(nn.Module):
         #lengths = feat_lengths
 
         # Pass through Conformer
-        x, reps, att, _ = self.conformer(x, lengths)  # Shape: [batch_size, seq_len, conformer_dim]
+        #x, reps, att, _ = self.conformer(x, lengths)  # Shape: [batch_size, seq_len, conformer_dim]
         #print(reps.shape)
 
         # Decode with LSTM
-        x, _ = self.decoder(x)  # Shape: [batch_size, seq_len, lstm_dim]
+        #x, _ = self.decoder(x)  # Shape: [batch_size, seq_len, lstm_dim]
+
+        #MLP layer
+        x = torch.flatten(self.relu(self.mlp_layer(x)), start_dim=1)
 
         # Classification
-        logits = self.classifier(x)  # Shape: [batch_size, seq_len, 40]
+        logits = self.classifier(x)  # Shape: [batch_size, 10000]
+        logits = logits.reshape(8, 250, 40)
+
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
         return log_probs
 
@@ -461,11 +473,21 @@ optimizer = torch.optim.Adam(finalModel.parameters(), lr=1e-3, weight_decay=1e-4
 lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=20, gamma=0.9)
 loss_function = nn.CTCLoss(blank=0, zero_infinity=True)
 
+#Setup for model evaluation
+def eval_step(engine, batch):
+    return batch
+
+default_evaluator = ignite.engine.Engine(eval_step)
+metric = ignite.metrics.confusion_matrix.ConfusionMatrix(num_classes=40)
+metric.attach(default_evaluator, 'cm')
+
 epochs = 1000
 for t in range(epochs):
     epoch_loss = 0.0
     num_batches = 0
     print(f"Epoch {t+1}\n-------------------------------")
+    with open('training_output.txt', 'a') as file:
+        file.write(f"Epoch {t+1}\n-------------------------------\n")
     for index, batch in enumerate(train_loader):
         finalModel.train()
         optimizer.zero_grad()
@@ -503,6 +525,8 @@ for t in range(epochs):
     
     avg_epoch_loss = epoch_loss / num_batches
     print(f"Average epoch loss: {avg_epoch_loss:>7f}")
+    with open('training_output.txt', 'a') as file:
+        file.write(f"Average epoch loss: {avg_epoch_loss:>7f}\n")
     print("Calculating test loss...")
     lr_scheduler.step()
     
@@ -511,6 +535,7 @@ for t in range(epochs):
     num_batches = 0
     incorrect_tokens = 0
     total_tokens = 0
+    final_confusion_matrix = torch.zeros(40, 40)
     
     with torch.no_grad():
         for batch in test_loader:
@@ -536,13 +561,18 @@ for t in range(epochs):
                 target_lengths)
             total_loss += loss.item()
             num_batches += 1
-            for i in range(batch_length * 250):
-                if tokens.flatten()[i] != 0:
-                    total_tokens += 1
-                    if torch.argmax(log_probs, dim=-1).flatten()[i] != tokens.flatten()[i]:
-                        incorrect_tokens += 1
+            state = default_evaluator.run([[torch.flatten(log_probs, start_dim=0, end_dim=1), tokens.flatten()]])
+            final_confusion_matrix = final_confusion_matrix + state.metrics['cm']         
 
     avg_loss = total_loss / num_batches
     print(f"Average loss of testing dataset: {avg_loss:>7f}")
-    token_error_rate = float(incorrect_tokens)/float(total_tokens)
-    print(f"Token error rate on testing dataset: {token_error_rate:>7f}\n")
+    with open('training_output.txt', 'a') as file:
+        file.write(f"Average loss of testing dataset: {avg_loss:>7f}\nConfusion matrix:\n")
+    print("Confusion matrix:")
+    for i in range(40):
+        confusion_matrix_row = ""
+        for j in range(40):
+            confusion_matrix_row = confusion_matrix_row + str(final_confusion_matrix[i,j].item())+'\t'
+        with open('training_output.txt', 'a') as file:
+            file.write(confusion_matrix_row+'\n')
+        print(confusion_matrix_row)
