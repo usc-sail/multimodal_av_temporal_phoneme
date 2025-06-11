@@ -14,8 +14,8 @@ import sys
 import numpy as np
 import cv2
 from typing import Optional, Tuple
-import ignite
 from itertools import groupby
+import Levenshtein
 
 #Libraries needed for wav2vec2-lv-60-espeak-cv-ft
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
@@ -472,11 +472,7 @@ loss_function = nn.CTCLoss(blank=0, zero_infinity=True)
 def eval_step(engine, batch):
     return batch
 
-phonemes = ['', 'AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW', 'B', 'CH', 'D', 'DH', 'F', 'G', 'HH', 'JH', 'K', 'L', 'M', 'N', 'NG', 'P', 'R', 'S', 'SH', 'T', 'TH', 'V', 'W', 'Y', 'Z', 'ZH']
-
-default_evaluator = ignite.engine.Engine(eval_step)
-metric = ignite.metrics.confusion_matrix.ConfusionMatrix(num_classes=40)
-metric.attach(default_evaluator, 'cm')
+phoneme_dictionary = ['', 'AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW', 'B', 'CH', 'D', 'DH', 'F', 'G', 'HH', 'JH', 'K', 'L', 'M', 'N', 'NG', 'P', 'R', 'S', 'SH', 'T', 'TH', 'V', 'W', 'Y', 'Z', 'ZH']
 
 epochs = 1000
 for t in range(epochs):
@@ -490,7 +486,7 @@ for t in range(epochs):
         optimizer.zero_grad()
         videos = batch["video"].to(device) #Shape: [batch_size, num_frames, H, W, 3]
         audio = batch["audio"].to(device) #Shape: [batch_size, num_channels, num_samples]
-        tokens = batch["phonemes"].to(device) #Shape: [batch_size, time_steps]
+        targets = batch["phonemes"].to(device) #Shape: [batch_size, time_steps]
         target_lengths = batch["phoneme_lengths"].to(device)
 
         #Acquire audio features
@@ -506,7 +502,7 @@ for t in range(epochs):
         #target_lengths = torch.randint(low=1, high=250, size=(batch_length,), dtype=torch.long)
         
         loss = loss_function(log_probs.transpose(0, 1),  # CTC expects [seq_len, batch, num_classes]
-                tokens, 
+                targets, 
                 input_lengths, 
                 target_lengths)
         loss.backward()
@@ -531,15 +527,14 @@ for t in range(epochs):
     finalModel.eval()
     total_loss = 0.0
     num_batches = 0
-    incorrect_tokens = 0
-    total_tokens = 0
-    final_confusion_matrix = torch.zeros(40, 40)
+    per_numerator = 0
+    per_denominator = 0
     
     with torch.no_grad():
         for batch in test_loader:
             videos = batch["video"].to(device)
             audio = batch["audio"].to(device)
-            tokens = batch["phonemes"].to(device)
+            targets = batch["phonemes"].to(device)
             target_lengths = batch["phoneme_lengths"].to(device)
 
             #Acquire audio features
@@ -556,18 +551,37 @@ for t in range(epochs):
             #target_lengths = torch.full((8,), 100, dtype=torch.long)
 
             loss = loss_function(log_probs.transpose(0, 1),  # CTC expects [seq_len, batch, num_classes]
-                tokens, 
+                targets, 
                 input_lengths, 
                 target_lengths)
             total_loss += loss.item()
             num_batches += 1
-            state = default_evaluator.run([[torch.flatten(log_probs, start_dim=0, end_dim=1), tokens.flatten()]])
-            final_confusion_matrix = final_confusion_matrix + state.metrics['cm']         
+
+            #Calculation of phoneme error rate (PER)
+            for i in range(8):
+                ref = []
+                hyp = []
+                for j in range(250):
+                    if torch.argmax(log_probs, dim=-1)[i,j].item() != 0:
+                        hyp.append(torch.argmax(log_probs, dim=-1)[i,j].item())
+                    if targets[i,j].item() != 0:
+                        ref.append(targets[i,j].item())
+                hyp = [key for key, _ in groupby(hyp)]
+                ref_str = " ".join(map(str, ref))
+                hyp_str = " ".join(map(str, hyp))
+                per_numerator = per_numerator + Levenshtein.distance(ref_str, hyp_str)
+                per_denominator = per_denominator + len(ref)
+                
 
     avg_loss = total_loss / num_batches
     print(f"Average loss of testing dataset: {avg_loss:>7f}")
     with open('training_output.txt', 'a') as file:
-        file.write(f"Average loss of testing dataset: {avg_loss:>7f}\nConfusion matrix:\n")
+        file.write(f"Average loss of testing dataset: {avg_loss:>7f}\n")
+
+    PER = per_numerator/per_denominator
+    print(f"PER on testing data: {PER:>7f}")
+    with open('training_output.txt', 'a') as file:
+        file.write(f"PER on testing data: {PER:>7f}\n")
     with torch.no_grad():
         audio, sr = torchaudio.load("/data1/jaypark/single_spk_corpus/five_second_audio/usc_s1_20_1654.wav")
         paddedAudio = torch.zeros(1, 80320)
@@ -578,10 +592,10 @@ for t in range(epochs):
         log_probs = finalModel(audio_features, torch.zeros(1, 1), 1024)
         predictedtokens = ""
         for i in range(250):
-            if phonemes[torch.argmax(log_probs, dim=-1)[0,i]] == "":
+            if phoneme_dictionary[torch.argmax(log_probs, dim=-1)[0,i]] == "":
                 predictedtokens = predictedtokens + "  "
             else:
-                predictedtokens = predictedtokens + phonemes[torch.argmax(log_probs, dim=-1)[0,i]] + " "
+                predictedtokens = predictedtokens + phoneme_dictionary[torch.argmax(log_probs, dim=-1)[0,i]] + " "
         print(predictedtokens)
         with open('training_output.txt', 'a') as file:
             file.write(predictedtokens+'\n')
