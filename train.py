@@ -15,6 +15,7 @@ import numpy as np
 import cv2
 from typing import Optional, Tuple
 import ignite
+from itertools import groupby
 
 #Libraries needed for wav2vec2-lv-60-espeak-cv-ft
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
@@ -341,11 +342,8 @@ class AV_Conformer(nn.Module):
         #Define relu activation function
         self.relu = nn.ReLU()
 
-        #MLP layer to analyze audio embeddings
-        self.mlp_layer = nn.Linear(1024, 392)
-
         # Final classification layer
-        self.classifier = nn.Linear(98000, 10000)
+        self.classifier = nn.Linear(128, 40)
 
     def forward(self, audio_features, video_features, feat_lengths):
     
@@ -365,14 +363,10 @@ class AV_Conformer(nn.Module):
         #print(reps.shape)
 
         # Decode with LSTM
-        #x, _ = self.decoder(x)  # Shape: [batch_size, seq_len, lstm_dim]
-
-        #MLP layer
-        x = torch.flatten(self.relu(self.mlp_layer(x)), start_dim=1)
+        x, _ = self.decoder(x)  # Shape: [batch_size, seq_len, lstm_dim]
 
         # Classification
-        logits = self.classifier(x)  # Shape: [batch_size, 10000]
-        logits = logits.reshape(8, 250, 40)
+        logits = self.classifier(x)  # Shape: [batch_size, 250, 40]
 
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
         return log_probs
@@ -437,11 +431,12 @@ class VideoAudioPhonemeDataset(Dataset):
                     tokens.append(self.phonemes.index('HH'))
                 else:
                     tokens.append(self.phonemes.index(''.join(char for char in line.strip() if char.isalpha())))
-        
+
         return {
             'video': video,
             'audio': zeroPaddedAudio,
-            'tokens': torch.tensor(tokens)
+            'phonemes': F.pad(torch.tensor([key for key, _ in groupby(tokens)]), (0, 250-torch.tensor([key for key, _ in groupby(tokens)]).shape[0])),
+            'phoneme_lengths': torch.tensor(len([key for key, _ in groupby(tokens)]))
         }
 
 # Define video directory path
@@ -455,11 +450,11 @@ batch_length = 8
 
 # Define the DataLoader
 whole_dataset = VideoAudioPhonemeDataset(video_directory)
-train_len = int(len(whole_dataset)*0.7)
+train_len = int(len(whole_dataset)*0.8)
 train_set, test_set = torch.utils.data.random_split(whole_dataset, [train_len, len(whole_dataset)-train_len])
 
-train_loader = DataLoader(train_set, batch_size=batch_length, shuffle=True)
-test_loader = DataLoader(test_set, batch_size=batch_length, shuffle=False)
+train_loader = DataLoader(train_set, batch_size=batch_length, shuffle=True, num_workers=8)
+test_loader = DataLoader(test_set, batch_size=batch_length, shuffle=False, num_workers=8)
 
 #Prepare models for audio feature acquisition
 processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-lv-60-espeak-cv-ft")
@@ -477,6 +472,8 @@ loss_function = nn.CTCLoss(blank=0, zero_infinity=True)
 def eval_step(engine, batch):
     return batch
 
+phonemes = ['', 'AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW', 'B', 'CH', 'D', 'DH', 'F', 'G', 'HH', 'JH', 'K', 'L', 'M', 'N', 'NG', 'P', 'R', 'S', 'SH', 'T', 'TH', 'V', 'W', 'Y', 'Z', 'ZH']
+
 default_evaluator = ignite.engine.Engine(eval_step)
 metric = ignite.metrics.confusion_matrix.ConfusionMatrix(num_classes=40)
 metric.attach(default_evaluator, 'cm')
@@ -493,7 +490,8 @@ for t in range(epochs):
         optimizer.zero_grad()
         videos = batch["video"].to(device) #Shape: [batch_size, num_frames, H, W, 3]
         audio = batch["audio"].to(device) #Shape: [batch_size, num_channels, num_samples]
-        tokens = batch["tokens"].to(device) #Shape: [batch_size, time_steps]
+        tokens = batch["phonemes"].to(device) #Shape: [batch_size, time_steps]
+        target_lengths = batch["phoneme_lengths"].to(device)
 
         #Acquire audio features
         audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt", padding=True).to(device)
@@ -505,8 +503,8 @@ for t in range(epochs):
         log_probs = finalModel(audio_features, videos, 1024) #Shape: [batch_size, 250, 40]
         # Prepare input and target lengths (all sequences are length 250 in your case)
         input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)
-        target_lengths = torch.randint(low=1, high=250, size=(batch_length,), dtype=torch.long)
-
+        #target_lengths = torch.randint(low=1, high=250, size=(batch_length,), dtype=torch.long)
+        
         loss = loss_function(log_probs.transpose(0, 1),  # CTC expects [seq_len, batch, num_classes]
                 tokens, 
                 input_lengths, 
@@ -541,7 +539,8 @@ for t in range(epochs):
         for batch in test_loader:
             videos = batch["video"].to(device)
             audio = batch["audio"].to(device)
-            tokens = batch["tokens"].to(device)
+            tokens = batch["phonemes"].to(device)
+            target_lengths = batch["phoneme_lengths"].to(device)
 
             #Acquire audio features
             audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt", padding=True).to(device)
@@ -553,7 +552,8 @@ for t in range(epochs):
             
             # Prepare input and target lengths (all sequences are length 250 in your case)
             input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)
-            target_lengths = torch.randint(low=1, high=250, size=(batch_length,), dtype=torch.long)
+            #target_lengths = torch.randint(low=1, high=250, size=(batch_length,), dtype=torch.long)
+            #target_lengths = torch.full((8,), 100, dtype=torch.long)
 
             loss = loss_function(log_probs.transpose(0, 1),  # CTC expects [seq_len, batch, num_classes]
                 tokens, 
@@ -568,11 +568,20 @@ for t in range(epochs):
     print(f"Average loss of testing dataset: {avg_loss:>7f}")
     with open('training_output.txt', 'a') as file:
         file.write(f"Average loss of testing dataset: {avg_loss:>7f}\nConfusion matrix:\n")
-    print("Confusion matrix:")
-    for i in range(40):
-        confusion_matrix_row = ""
-        for j in range(40):
-            confusion_matrix_row = confusion_matrix_row + str(final_confusion_matrix[i,j].item())+'\t'
+    with torch.no_grad():
+        audio, sr = torchaudio.load("/data1/jaypark/single_spk_corpus/five_second_audio/usc_s1_20_1654.wav")
+        paddedAudio = torch.zeros(1, 80320)
+        paddedAudio[:,0:80000] = audio
+        paddedAudio = paddedAudio.to(device)
+        audio_values = processor(paddedAudio, sampling_rate = 16000, return_tensors="pt", padding=True).to(device)
+        audio_features = audio_features_model(audio_values['input_values'][0,:,:]).last_hidden_state
+        log_probs = finalModel(audio_features, torch.zeros(1, 1), 1024)
+        predictedtokens = ""
+        for i in range(250):
+            if phonemes[torch.argmax(log_probs, dim=-1)[0,i]] == "":
+                predictedtokens = predictedtokens + "  "
+            else:
+                predictedtokens = predictedtokens + phonemes[torch.argmax(log_probs, dim=-1)[0,i]] + " "
+        print(predictedtokens)
         with open('training_output.txt', 'a') as file:
-            file.write(confusion_matrix_row+'\n')
-        print(confusion_matrix_row)
+            file.write(predictedtokens+'\n')
