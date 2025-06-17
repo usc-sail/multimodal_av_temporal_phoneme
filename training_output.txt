@@ -1,2 +1,32 @@
 Epoch 1
 -------------------------------
+Average epoch loss: 0.603804
+Average loss of testing dataset: 0.396948
+PER on testing data: 0.477846
+                                                                          W W IH       CH     S S     IH         T S       JH   AH         S   T   AH       K   R R   AA             S           F   R AH               M                                   AA       R         IH       T   AH       L     IY               AH     N D   DH IY                 AA       N N DH IY IY     EY           D R R IY     AE       T   IH     K     S               IY                                                                             
+Epoch 2
+-------------------------------
+Average epoch loss: 0.105762
+Average loss of testing dataset: 0.390222
+PER on testing data: 0.465792
+                                                                          W W IH       CH   S S S     IH       T T S       JH   AH         S   T T AH       K   R R   AA             S           F   R AH               M                                   AA                 IH       T   AH       L     IY               AH     N D   DH IY                 AA       N N DH IY IY     EY           D R R IY     AE       T   IH     K     S               IY                                                                             
+Epoch 3
+-------------------------------
+Average epoch loss: 0.054886
+Average loss of testing dataset: 0.401563
+PER on testing data: 0.467340
+                                                                              IH       CH   S S S     IH       T T S       JH   AH         S   T T AH       K   R R   AA             S           F   R AH               M                                   AA                 IH       T   AH       L     IY               AH     N D D DH AH                 AA     N N N DH IY IY     EY           D R R IY     AE       T   IH     K     S               IY                                                                             
+Epoch 4
+-------------------------------
+Average epoch loss: 0.017376
+Average loss of testing dataset: 0.412745
+PER on testing data: 0.480303
+                                                                          W W IH       CH     S S     IH         T S       JH   AH         S   T T AH       K   R R   AA             S           F   R AH               M                                   AA                 IH       T   AH       L     IY               AH     N     DH AH                 AA     N N N DH IY IY     EY           D R IY IY     AE       T   IH     K     S               IY                                                                             
+Epoch 5
+-------------------------------
+Average epoch loss: -0.011714
+Average loss of testing dataset: 0.479804
+PER on testing data: 0.469663
+                                                                          W W IH       CH   S S S     IH     T T T S S     JH   AH       S S T T T AH       K   R R   AA             S S         F R R ER               M                                   AA       R         IH       T   AH       L     IY               AH     N N   DH IY                 AA     N N N DH IY IY     EY           D R IY IY     AE       T   IH     K     S               IY                                                                             
+Epoch 6
+-------------------------------

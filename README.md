@@ -6,3 +6,7 @@ Prerequisite libraries:
 -numpy
 -cv2
 -transformers
+-Levenshtein
+
+Command to start training:
+-python train.py
