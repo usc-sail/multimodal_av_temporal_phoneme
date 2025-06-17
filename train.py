@@ -372,7 +372,7 @@ class AV_Conformer(nn.Module):
         return log_probs
 
 class VideoAudioPhonemeDataset(Dataset):
-    def __init__(self, root_dir, transform=None):
+    def __init__(self, root_dir, transform=None, training=True):
         """
         Args:
             root_dir (str): Path to the directory containing video, audio and text files.
@@ -382,7 +382,18 @@ class VideoAudioPhonemeDataset(Dataset):
         all_video_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "avi/five_second_clips"))) if f.endswith('.avi')]
         all_audio_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_audio"))) if f.endswith('.wav')]
         all_token_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_tokens"))) if f.endswith('.txt')]
-        indices = random.sample(range(len(all_video_files)), 10000)
+        sample_quantity = 0
+        if training:
+            all_video_files = all_video_files[0:137583]
+            all_audio_files = all_audio_files[0:137583]
+            all_token_files = all_token_files[0:137583]
+            sample_quantity = 8000
+        else:
+            all_video_files = all_video_files[137583:]
+            all_audio_files = all_audio_files[137583:]
+            all_token_files = all_token_files[137583:]
+            sample_quantity = 2000
+        indices = random.sample(range(len(all_video_files)), sample_quantity)
         
         #Since the dataset of 5 second sequences is too large, randomly choose 10000 of them.
         self.video_files = []
@@ -449,9 +460,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 batch_length = 8
 
 # Define the DataLoader
-whole_dataset = VideoAudioPhonemeDataset(video_directory)
-train_len = int(len(whole_dataset)*0.8)
-train_set, test_set = torch.utils.data.random_split(whole_dataset, [train_len, len(whole_dataset)-train_len])
+#whole_dataset = VideoAudioPhonemeDataset(video_directory)
+#train_len = int(len(whole_dataset)*0.8)
+#train_set, test_set = torch.utils.data.random_split(whole_dataset, [train_len, len(whole_dataset)-train_len])
+train_set = VideoAudioPhonemeDataset(video_directory, training=True)
+test_set = VideoAudioPhonemeDataset(video_directory, training=False)
 
 train_loader = DataLoader(train_set, batch_size=batch_length, shuffle=True, num_workers=8)
 test_loader = DataLoader(test_set, batch_size=batch_length, shuffle=False, num_workers=8)
@@ -583,7 +596,7 @@ for t in range(epochs):
     with open('training_output.txt', 'a') as file:
         file.write(f"PER on testing data: {PER:>7f}\n")
     with torch.no_grad():
-        audio, sr = torchaudio.load("/data1/jaypark/single_spk_corpus/five_second_audio/usc_s1_20_1654.wav")
+        audio, sr = torchaudio.load("/data1/jaypark/single_spk_corpus/five_second_audio/usc_s1_66_0554.wav")
         paddedAudio = torch.zeros(1, 80320)
         paddedAudio[:,0:80000] = audio
         paddedAudio = paddedAudio.to(device)
