@@ -308,7 +308,7 @@ class AV_Conformer(nn.Module):
 
         # Modality type: 'audio', 'video', or 'multimodal'
         self.audio_dim = 1024
-        self.vid_dim = 1024
+        self.vid_dim = 32768
         self.modality = modality
         self.device = device
 
@@ -347,7 +347,7 @@ class AV_Conformer(nn.Module):
         if self.modality == 'audio':
             x = audio_features #Shape: [batch_size, 250, 1024]
         elif self.modality == 'video':
-            x = video_features
+            x = video_features #Shape: [batch_size, 250, 19200]
         else:  # multimodal
             x = torch.cat([audio_features, video_features], dim=-1)
         batch_size = x.shape[0]

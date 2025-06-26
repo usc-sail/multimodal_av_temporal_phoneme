@@ -1,6 +1,5 @@
 #General libraries needed for model training/evaluation
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 import torchaudio
@@ -67,8 +66,7 @@ class VideoAudioPhonemeDataset(Dataset):
             if not ret:
                 break
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(frame)
-        cap.release()
+            frames.append(cv2.resize(frame, (128, 128)))
         video = torch.tensor(np.array(frames), dtype=torch.float32)
         
         #Fetch audio

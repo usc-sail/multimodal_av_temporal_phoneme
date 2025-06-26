@@ -22,6 +22,9 @@ from models import AV_Conformer
 #Libraries needed for wav2vec2-lv-60-espeak-cv-ft
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
 
+#Libraries needed for video encoding
+from torchvision.models.optical_flow import raft_large
+
 # Define video directory path
 video_directory = "/data1/jaypark/single_spk_corpus"
 
@@ -38,14 +41,16 @@ batch_length = 8
 train_set = VideoAudioPhonemeDataset(video_directory, training=True)
 test_set = VideoAudioPhonemeDataset(video_directory, training=False)
 
-train_loader = DataLoader(train_set, batch_size=batch_length, shuffle=True, num_workers=8)
-test_loader = DataLoader(test_set, batch_size=batch_length, shuffle=False, num_workers=8)
+train_loader = DataLoader(train_set, batch_size=batch_length, shuffle=True, num_workers=4)
+test_loader = DataLoader(test_set, batch_size=batch_length, shuffle=False, num_workers=4)
 
 #Prepare models for audio feature acquisition
 processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-lv-60-espeak-cv-ft")
 audio_features_model = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-lv-60-espeak-cv-ft").to(device)
 
 #Prepare models for video feature acquisition
+video_model = raft_large(pretrained=True, progress=False).to(device)
+video_model = video_model.eval()
 
 #Initialize our training parameters
 finalModel = AV_Conformer(device=device, modality="audio", num_heads=4, num_layers=3).to(device)
@@ -69,19 +74,25 @@ for t in range(epochs):
     for index, batch in enumerate(train_loader):
         finalModel.train()
         optimizer.zero_grad()
-        videos = batch["video"].to(device) #Shape: [batch_size, num_frames, H, W, 3]
-        audio = batch["audio"].to(device) #Shape: [batch_size, num_channels, num_samples]
+        videos = batch["video"] #Shape: [batch_size, num_frames, H, W, 3]
+        audio = batch["audio"] #Shape: [batch_size, num_channels, num_samples]
         targets = batch["phonemes"].to(device) #Shape: [batch_size, time_steps]
         target_lengths = batch["phoneme_lengths"].to(device)
 
         #Acquire audio features
-        audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt", padding=True).to(device)
+        audio_values = processor(audio[:,0,:].to(device), sampling_rate = 16000, return_tensors="pt", padding=True).to(device)
         with torch.no_grad():
             #audio_features = audio_features_model(audio_inputs[0])
             audio_features = audio_features_model(audio_values['input_values'][0,:,:]).last_hidden_state #Shape: [batch_size, time_steps, 1024]
-        #Acquire video features
         
-        log_probs = finalModel(audio_features, videos, 1024) #Shape: [batch_size, 250, 40]
+        #Acquire video features
+        list_of_flows = torch.rand(batch_length, 250, 2, 128, 128).to(device)
+        for i in range(batch_length):
+            with torch.no_grad():
+                list_of_flows[i,:,:,:,:] = video_model(videos[i,::2, :, :, :].permute(0, 3, 1, 2).to(device), videos[i,1::2, :, :, :].permute(0, 3, 1, 2).to(device))[-1]
+        list_of_flows = torch.flatten(list_of_flows, start_dim=2)
+
+        log_probs = finalModel(audio_features, list_of_flows, 1024) #Shape: [batch_size, 250, 40]
         # Prepare input and target lengths (all sequences are length 250 in your case)
         input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)
         #target_lengths = torch.randint(low=1, high=250, size=(batch_length,), dtype=torch.long)
@@ -117,18 +128,23 @@ for t in range(epochs):
     
     with torch.no_grad():
         for batch in test_loader:
-            videos = batch["video"].to(device)
-            audio = batch["audio"].to(device)
+            videos = batch["video"]
+            audio = batch["audio"]
             targets = batch["phonemes"].to(device)
             target_lengths = batch["phoneme_lengths"].to(device)
 
             #Acquire audio features
-            audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt", padding=True).to(device)
+            audio_values = processor(audio[:,0,:].to(device), sampling_rate = 16000, return_tensors="pt", padding=True).to(device)
             audio_features = audio_features_model(audio_values['input_values'][0,:,:]).last_hidden_state #Shape: [batch_size, time_steps, 1024]
 
             #Acquire video features
+            list_of_flows = torch.rand(batch_length, 250, 2, 128, 128).to(device)
+            for i in range(batch_length):
+                with torch.no_grad():
+                    list_of_flows[i,:,:,:,:] = video_model(videos[i,::2, :, :, :].permute(0, 3, 1, 2).to(device), videos[i,1::2, :, :, :].permute(0, 3, 1, 2).to(device))[-1]
+            list_of_flows = torch.flatten(list_of_flows, start_dim=2)
 
-            log_probs = finalModel(audio_features, videos, 1024) #Shape: [batch_size, 250, 40]
+            log_probs = finalModel(audio_features, list_of_flows, 1024) #Shape: [batch_size, 250, 40]
             
             # Prepare input and target lengths (all sequences are length 250 in your case)
             input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)
