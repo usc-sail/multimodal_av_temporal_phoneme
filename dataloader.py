@@ -1,20 +1,21 @@
 #General libraries needed for model training/evaluation
 import torch
 import torch.nn.functional as F
-import torchvision
+# import torchvision
 import torchaudio
-from torchaudio.utils import download_asset
+# from torchaudio.utils import download_asset
 from torch.utils.data import Dataset, DataLoader
-import IPython
-import matplotlib.pyplot as plt
+# import IPython
+# import matplotlib.pyplot as plt
 import os
 import random
-import sys
+# import sys
 import numpy as np
 import cv2
-from typing import Optional, Tuple
+# from typing import Optional, Tuple
 from itertools import groupby
-import Levenshtein
+# import Levenshtein
+from einops import rearrange
 
 class VideoAudioPhonemeDataset(Dataset):
     def __init__(self, root_dir, transform=None, training=True):
@@ -68,7 +69,7 @@ class VideoAudioPhonemeDataset(Dataset):
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frames.append(cv2.resize(frame, (128, 128)))
         video = torch.tensor(np.array(frames), dtype=torch.float32)
-        
+        video = rearrange(video, 't h w c -> t c h w')  # Rearrange to (T, C, H, W)
         #Fetch audio
         audio_path = os.path.join(self.root_dir, "five_second_audio", self.audio_files[idx])
         audio, sr = torchaudio.load(audio_path)
@@ -80,6 +81,7 @@ class VideoAudioPhonemeDataset(Dataset):
         # Fetch tokens
         token_path = os.path.join(self.root_dir, "five_second_tokens", self.token_files[idx])
         tokens = []
+
         with open(token_path, 'r') as file:
             for line in file:
                 if ''.join(char for char in line.strip() if char.isalpha()) == "H":

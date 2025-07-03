@@ -2,47 +2,27 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
 import torchaudio
-from torchaudio.utils import download_asset
 from torch.utils.data import Dataset, DataLoader
-import IPython
-import matplotlib.pyplot as plt
-import os
-import random
-import sys
-import numpy as np
-import cv2
-from typing import Optional, Tuple
 from itertools import groupby
 import Levenshtein
 from dataloader import VideoAudioPhonemeDataset
-from models import AV_Conformer
-
-#Libraries needed for wav2vec2-lv-60-espeak-cv-ft
+from models import AV_Conformer, rtMRI_Encoder
+from utils import get_dataset
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
 
 #Libraries needed for video encoding
 from torchvision.models.optical_flow import raft_large
 
-# Define video directory path
-video_directory = "/data1/jaypark/single_spk_corpus"
 
-#Define device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-#Define batch length
-batch_length = 8
+video_directory = "/data1/open_data/single_spk_corpus" # Define video directory path
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu") #Define device
+batch_length = 1 #Define batch length
+phoneme_dictionary = ['', 'AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW', 'B', 'CH', 'D', 'DH', 'F', 'G', 'HH', 'JH', 'K', 'L', 'M', 'N', 'NG', 'P', 'R', 'S', 'SH', 'T', 'TH', 'V', 'W', 'Y', 'Z', 'ZH']
+epochs = 100
 
 # Define the DataLoader
-#whole_dataset = VideoAudioPhonemeDataset(video_directory)
-#train_len = int(len(whole_dataset)*0.8)
-#train_set, test_set = torch.utils.data.random_split(whole_dataset, [train_len, len(whole_dataset)-train_len])
-train_set = VideoAudioPhonemeDataset(video_directory, training=True)
-test_set = VideoAudioPhonemeDataset(video_directory, training=False)
-
-train_loader = DataLoader(train_set, batch_size=batch_length, shuffle=True, num_workers=4)
-test_loader = DataLoader(test_set, batch_size=batch_length, shuffle=False, num_workers=4)
+train_loader, test_loader = get_dataset(video_directory, batch_length)
 
 #Prepare models for audio feature acquisition
 processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-lv-60-espeak-cv-ft")
@@ -53,7 +33,7 @@ video_model = raft_large(pretrained=True, progress=False).to(device)
 video_model = video_model.eval()
 
 #Initialize our training parameters
-finalModel = AV_Conformer(device=device, modality="audio", num_heads=4, num_layers=3).to(device)
+finalModel = rtMRI_Encoder(modality="ai").cuda()
 optimizer = torch.optim.Adam(finalModel.parameters(), lr=1e-3, weight_decay=1e-4)
 lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=20, gamma=0.9)
 loss_function = nn.CTCLoss(blank=0, zero_infinity=True)
@@ -62,9 +42,6 @@ loss_function = nn.CTCLoss(blank=0, zero_infinity=True)
 def eval_step(engine, batch):
     return batch
 
-phoneme_dictionary = ['', 'AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW', 'B', 'CH', 'D', 'DH', 'F', 'G', 'HH', 'JH', 'K', 'L', 'M', 'N', 'NG', 'P', 'R', 'S', 'SH', 'T', 'TH', 'V', 'W', 'Y', 'Z', 'ZH']
-
-epochs = 1000
 for t in range(epochs):
     epoch_loss = 0.0
     num_batches = 0
@@ -74,11 +51,13 @@ for t in range(epochs):
     for index, batch in enumerate(train_loader):
         finalModel.train()
         optimizer.zero_grad()
-        videos = batch["video"] #Shape: [batch_size, num_frames, H, W, 3]
-        audio = batch["audio"] #Shape: [batch_size, num_channels, num_samples]
-        targets = batch["phonemes"].to(device) #Shape: [batch_size, time_steps]
+        videos = batch["video"].cuda() #Shape: [batch_size, num_frames, H, W, 3]
+        audio = batch["audio"].cuda() #Shape: [batch_size, num_channels, num_samples]
+        # assert False, f"batch phonemes.shape {batch[/'phonemes/'].shape}"
+        targets = batch["phonemes"].cuda() #Shape: [batch_size, time_steps]
+        # assert False, f"batch phonemes.shape {targets.shape}"
         target_lengths = batch["phoneme_lengths"].to(device)
-
+        # assert False, f"target_lengths.shape {target_lengths.shape} is : {target_lengths}"
         #Acquire audio features
         audio_values = processor(audio[:,0,:].to(device), sampling_rate = 16000, return_tensors="pt", padding=True).to(device)
         with torch.no_grad():
@@ -86,17 +65,18 @@ for t in range(epochs):
             audio_features = audio_features_model(audio_values['input_values'][0,:,:]).last_hidden_state #Shape: [batch_size, time_steps, 1024]
         
         #Acquire video features
-        list_of_flows = torch.rand(batch_length, 250, 2, 128, 128).to(device)
-        for i in range(batch_length):
-            with torch.no_grad():
-                list_of_flows[i,:,:,:,:] = video_model(videos[i,::2, :, :, :].permute(0, 3, 1, 2).to(device), videos[i,1::2, :, :, :].permute(0, 3, 1, 2).to(device))[-1]
-        list_of_flows = torch.flatten(list_of_flows, start_dim=2)
+        # list_of_flows = torch.rand(batch_length, 250, 2, 128, 128).to(device)
+        # for i in range(batch_length):
+        #     with torch.no_grad():
+        #         list_of_flows[i,:,:,:,:] = video_model(videos[i,::2, :, :, :].permute(0, 3, 1, 2).to(device), videos[i,1::2, :, :, :].permute(0, 3, 1, 2).to(device))[-1]
+        # list_of_flows = torch.flatten(list_of_flows, start_dim=2)
 
-        log_probs = finalModel(audio_features, list_of_flows, 1024) #Shape: [batch_size, 250, 40]
+        log_probs = finalModel(audio_features, videos[:,::2,:], 1024) #Shape: [batch_size, 250, 40]
+        # assert False, f"videos shape {videos.shape}"
         # Prepare input and target lengths (all sequences are length 250 in your case)
         input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)
         #target_lengths = torch.randint(low=1, high=250, size=(batch_length,), dtype=torch.long)
-        
+        # assert False, f"targets.shape {targets.shape} and log_probs.shape {log_probs.shape} and target_lengths.shape {target_lengths}"
         loss = loss_function(log_probs.transpose(0, 1),  # CTC expects [seq_len, batch, num_classes]
                 targets, 
                 input_lengths, 

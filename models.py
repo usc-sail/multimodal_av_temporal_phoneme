@@ -2,20 +2,22 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
-import torchaudio
+# import torchvision
+# import torchaudio
 from torchaudio.utils import download_asset
 from torch.utils.data import Dataset, DataLoader
-import IPython
+# import IPython
 import matplotlib.pyplot as plt
-import os
-import random
-import sys
+# import os
+# import random
+# import sys
 import numpy as np
-import cv2
+# import cv2
 from typing import Optional, Tuple
-from itertools import groupby
-import Levenshtein
+# from itertools import groupby
+# import Levenshtein
+from vision_transformer import VisionTransformer, partial
+from einops import rearrange
 
 def _lengths_to_padding_mask(lengths: torch.Tensor) -> torch.Tensor:
     batch_size = lengths.shape[0]
@@ -361,6 +363,84 @@ class AV_Conformer(nn.Module):
 
         # Decode with LSTM
         x, _ = self.decoder(x)  # Shape: [batch_size, seq_len, lstm_dim]
+
+        # Classification
+        logits = self.classifier(x)  # Shape: [batch_size, 250, 40]
+
+        log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+        return log_probs
+    
+class rtMRI_Encoder(nn.Module):
+    def __init__(self, 
+                 modality='a', 
+                 feats='base', 
+                 patch_size=8, 
+                 depth=12, 
+                 num_heads=6, 
+                 mlp_ratio=4,
+                 sequence_model='lstm'):
+        
+        super().__init__()
+
+        # Modality type: 'audio', 'video', or 'multimodal'
+        self.audio_dim = 1024
+        self.vid_dim = 384
+        self.modality = modality
+
+        if modality == 'a': # audio only
+            input_dim = self.audio_dim 
+        elif modality == 'ai': # audio + image
+            input_dim = self.vid_dim
+            # self.motion_model = VisionTransformer(in_chans=2, patch_size=patch_size, embed_dim=384, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
+            self.visual_model = VisionTransformer(in_chans=3, patch_size=patch_size, embed_dim=self.vid_dim, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
+        else:
+            input_dim = self.audio_dim + self.vid_dim
+    
+        # LSTM decoder
+        self.sequence_model = nn.LSTM(
+            input_size=input_dim,
+            hidden_size=128,
+            num_layers=1,
+            batch_first=True,
+        ) if sequence_model == 'lstm' else None
+
+        #Define relu activation function
+        self.relu = nn.ReLU()
+
+        # Final classification layer
+        self.classifier = nn.Linear(128, 40)
+
+    def forward(self, audio_features, video_features, feat_lengths):
+        """
+        args:
+            audio_features: Tensor of shape [batch_size, 250, 1024] 
+            video_features: Tensor of shape [batch_size, 250, 3, 128, 128]
+            feat_lengths: Tensor of shape [batch_size] containing lengths of each sequence
+            returns:
+                log_probs: Tensor of shape [batch_size, 250, 40] containing log probabilities for each class
+        """
+        if self.modality == 'a':
+            x = audio_features #Shape: [batch_size, 250, 1024]
+        elif self.modality == 'ai':
+            b = video_features.shape[0]
+            t = video_features.shape[1]
+            ai_feas = rearrange(video_features, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
+            x = self.visual_model(ai_feas) #Shape: [batch_size* 250, 1024]
+            x = rearrange(x, '(b t) e -> b t e', b=b, t=t)  #Shape: [batch_size, 250, 1024]
+        else:  # multimodal
+            x = torch.cat([audio_features, video_features], dim=-1)
+
+        batch_size = x.shape[0]
+
+        # lengths = torch.full((batch_size,), 250, dtype=torch.long).to(self.device)
+        #lengths = feat_lengths
+
+        # Pass through Conformer
+        #x, reps, att, _ = self.conformer(x, lengths)  # Shape: [batch_size, seq_len, conformer_dim]
+        #print(reps.shape)
+
+        # Decode with LSTM
+        x, _ = self.sequence_model(x)  # Shape: [batch_size, seq_len, lstm_dim]
 
         # Classification
         logits = self.classifier(x)  # Shape: [batch_size, 250, 40]
