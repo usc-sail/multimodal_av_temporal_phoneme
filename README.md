@@ -7,6 +7,7 @@ Prerequisite libraries:
 -cv2
 -transformers
 -Levenshtein
+-einops
 
 Command to start training:
 -python train.py
