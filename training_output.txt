@@ -1,96 +1,118 @@
 Epoch 1
 -------------------------------
-Average epoch loss: 0.603804
-Average loss of testing dataset: 0.396948
-PER on testing data: 0.477846
-                                                                          W W IH       CH     S S     IH         T S       JH   AH         S   T   AH       K   R R   AA             S           F   R AH               M                                   AA       R         IH       T   AH       L     IY               AH     N D   DH IY                 AA       N N DH IY IY     EY           D R R IY     AE       T   IH     K     S               IY                                                                             
 Epoch 2
 -------------------------------
-Average epoch loss: 0.105762
-Average loss of testing dataset: 0.390222
-PER on testing data: 0.465792
-                                                                          W W IH       CH   S S S     IH       T T S       JH   AH         S   T T AH       K   R R   AA             S           F   R AH               M                                   AA                 IH       T   AH       L     IY               AH     N D   DH IY                 AA       N N DH IY IY     EY           D R R IY     AE       T   IH     K     S               IY                                                                             
 Epoch 3
 -------------------------------
-Average epoch loss: 0.054886
-Average loss of testing dataset: 0.401563
-PER on testing data: 0.467340
-                                                                              IH       CH   S S S     IH       T T S       JH   AH         S   T T AH       K   R R   AA             S           F   R AH               M                                   AA                 IH       T   AH       L     IY               AH     N D D DH AH                 AA     N N N DH IY IY     EY           D R R IY     AE       T   IH     K     S               IY                                                                             
 Epoch 4
 -------------------------------
-Average epoch loss: 0.017376
-Average loss of testing dataset: 0.412745
-PER on testing data: 0.480303
-                                                                          W W IH       CH     S S     IH         T S       JH   AH         S   T T AH       K   R R   AA             S           F   R AH               M                                   AA                 IH       T   AH       L     IY               AH     N     DH AH                 AA     N N N DH IY IY     EY           D R IY IY     AE       T   IH     K     S               IY                                                                             
 Epoch 5
 -------------------------------
-Average epoch loss: -0.011714
-Average loss of testing dataset: 0.479804
-PER on testing data: 0.469663
-                                                                          W W IH       CH   S S S     IH     T T T S S     JH   AH       S S T T T AH       K   R R   AA             S S         F R R ER               M                                   AA       R         IH       T   AH       L     IY               AH     N N   DH IY                 AA     N N N DH IY IY     EY           D R IY IY     AE       T   IH     K     S               IY                                                                             
 Epoch 6
 -------------------------------
-Epoch 1
+Epoch 7
+-------------------------------
+Epoch 8
+-------------------------------
+Epoch 9
+-------------------------------
+Epoch 10
+-------------------------------
+Epoch 11
 -------------------------------
 Epoch 1
 -------------------------------
-Epoch 1
+Epoch 2
 -------------------------------
-Epoch 1
+Epoch 3
 -------------------------------
-Epoch 1
+Epoch 4
 -------------------------------
-Epoch 1
+Epoch 5
 -------------------------------
-Epoch 1
+Epoch 6
 -------------------------------
-Epoch 1
+Epoch 7
 -------------------------------
-Epoch 1
+Epoch 8
 -------------------------------
-Epoch 1
+Epoch 9
 -------------------------------
-Epoch 1
+Epoch 10
 -------------------------------
-Epoch 1
+Epoch 11
 -------------------------------
-Epoch 1
+Epoch 12
 -------------------------------
-Epoch 1
+Epoch 13
 -------------------------------
-Epoch 1
+Epoch 14
 -------------------------------
-Epoch 1
+Epoch 15
 -------------------------------
-Epoch 1
+Epoch 16
 -------------------------------
-Epoch 1
+Epoch 17
 -------------------------------
-Epoch 1
+Epoch 18
 -------------------------------
-Epoch 1
+Epoch 19
 -------------------------------
-Epoch 1
+Epoch 20
 -------------------------------
-Epoch 1
+Epoch 21
 -------------------------------
-Epoch 1
+Epoch 22
 -------------------------------
-Epoch 1
+Epoch 23
 -------------------------------
-Epoch 1
+Epoch 24
 -------------------------------
-Epoch 1
+Epoch 25
 -------------------------------
-Epoch 1
+Epoch 26
 -------------------------------
-Epoch 1
+Epoch 27
 -------------------------------
-Epoch 1
+Epoch 28
 -------------------------------
-Epoch 1
+Epoch 29
 -------------------------------
-Epoch 1
+Epoch 30
 -------------------------------
-Epoch 1
+Epoch 31
+-------------------------------
+Epoch 32
+-------------------------------
+Epoch 33
+-------------------------------
+Epoch 34
+-------------------------------
+Epoch 35
+-------------------------------
+Epoch 36
+-------------------------------
+Epoch 37
+-------------------------------
+Epoch 38
+-------------------------------
+Epoch 39
+-------------------------------
+Epoch 40
+-------------------------------
+Epoch 41
+-------------------------------
+Epoch 42
+-------------------------------
+Epoch 43
+-------------------------------
+Epoch 44
+-------------------------------
+Epoch 45
+-------------------------------
+Epoch 46
+-------------------------------
+Epoch 47
+-------------------------------
+Epoch 48
 -------------------------------

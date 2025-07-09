@@ -389,7 +389,7 @@ class rtMRI_Encoder(nn.Module):
 
         if modality == 'a': # audio only
             input_dim = self.audio_dim 
-        elif modality == 'ai': # audio + image
+        elif modality == 'i': # audio + image
             input_dim = self.vid_dim
             # self.motion_model = VisionTransformer(in_chans=2, patch_size=patch_size, embed_dim=384, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
             self.visual_model = VisionTransformer(in_chans=3, patch_size=patch_size, embed_dim=self.vid_dim, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
@@ -408,7 +408,7 @@ class rtMRI_Encoder(nn.Module):
         self.relu = nn.ReLU()
 
         # Final classification layer
-        self.classifier = nn.Linear(128, 40)
+        self.classifier = nn.Linear(input_dim, 40)
 
     def forward(self, audio_features, video_features, feat_lengths):
         """
@@ -421,7 +421,7 @@ class rtMRI_Encoder(nn.Module):
         """
         if self.modality == 'a':
             x = audio_features #Shape: [batch_size, 250, 1024]
-        elif self.modality == 'ai':
+        elif self.modality == 'i':
             b = video_features.shape[0]
             t = video_features.shape[1]
             ai_feas = rearrange(video_features, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
@@ -440,7 +440,7 @@ class rtMRI_Encoder(nn.Module):
         #print(reps.shape)
 
         # Decode with LSTM
-        x, _ = self.sequence_model(x)  # Shape: [batch_size, seq_len, lstm_dim]
+        # x, _ = self.sequence_model(x)  # Shape: [batch_size, seq_len, lstm_dim]
 
         # Classification
         logits = self.classifier(x)  # Shape: [batch_size, 250, 40]
