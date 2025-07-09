@@ -1,20 +1,13 @@
 #General libraries needed for model training/evaluation
 import torch
 import torch.nn.functional as F
-# import torchvision
 import torchaudio
-# from torchaudio.utils import download_asset
 from torch.utils.data import Dataset, DataLoader
-# import IPython
-# import matplotlib.pyplot as plt
 import os
 import random
-# import sys
 import numpy as np
 import cv2
-# from typing import Optional, Tuple
 from itertools import groupby
-# import Levenshtein
 from einops import rearrange
 
 class VideoAudioPhonemeDataset(Dataset):
@@ -25,27 +18,44 @@ class VideoAudioPhonemeDataset(Dataset):
             transform (callable, optional): Transform for video frames.
         """
         self.root_dir = root_dir
+        #all_flow_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_flows"))) if f.endswith('.npy')]
         all_video_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "avi/five_second_clips"))) if f.endswith('.avi')]
         all_audio_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_audio"))) if f.endswith('.wav')]
         all_token_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_tokens"))) if f.endswith('.txt')]
         sample_quantity = 0
         if training:
+            #For CARC:
+            #all_flow_files = all_flow_files[0:26097]
+            #all_video_files = all_video_files[0:26097]
+            #all_audio_files = all_audio_files[0:26097]
+            #all_token_files = all_token_files[0:26097]
+
+            #For Redondo:
             all_video_files = all_video_files[0:137583]
             all_audio_files = all_audio_files[0:137583]
             all_token_files = all_token_files[0:137583]
             sample_quantity = 8000
         else:
+            #For CARC:
+            #all_flow_files = all_flow_files[26097:]
+            #all_video_files = all_video_files[26097:]
+            #all_audio_files = all_audio_files[26097:]
+            #all_token_files = all_token_files[26097:]
+
+            #For Redondo:
             all_video_files = all_video_files[137583:]
             all_audio_files = all_audio_files[137583:]
             all_token_files = all_token_files[137583:]
-            sample_quantity = 2000
+            sample_quantity = 1000
         indices = random.sample(range(len(all_video_files)), sample_quantity)
         
         #Since the dataset of 5 second sequences is too large, randomly choose 10000 of them.
+        #self.flow_files = []
         self.video_files = []
         self.audio_files = []
         self.token_files = []
         for i in indices:
+            #self.flow_files.append(all_flow_files[i])
             self.video_files.append(all_video_files[i])
             self.audio_files.append(all_audio_files[i])
             self.token_files.append(all_token_files[i])
@@ -58,6 +68,10 @@ class VideoAudioPhonemeDataset(Dataset):
         return len(self.video_files)
 
     def __getitem__(self, idx):
+        #Fetch flows
+        #flow_path = os.path.join(self.root_dir, "five_second_flows", self.flow_files[idx])
+        #flow = np.load(flow_path)
+        
         #Fetch video
         video_path = os.path.join(self.root_dir, "avi/five_second_clips", self.video_files[idx])
         cap = cv2.VideoCapture(video_path)
@@ -69,7 +83,9 @@ class VideoAudioPhonemeDataset(Dataset):
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frames.append(cv2.resize(frame, (128, 128)))
         video = torch.tensor(np.array(frames), dtype=torch.float32)
-        video = rearrange(video, 't h w c -> t c h w')  # Rearrange to (T, C, H, W)
+        video = rearrange(video, 't h w c -> t c h w')
+        cap.release()
+        
         #Fetch audio
         audio_path = os.path.join(self.root_dir, "five_second_audio", self.audio_files[idx])
         audio, sr = torchaudio.load(audio_path)
@@ -81,7 +97,6 @@ class VideoAudioPhonemeDataset(Dataset):
         # Fetch tokens
         token_path = os.path.join(self.root_dir, "five_second_tokens", self.token_files[idx])
         tokens = []
-
         with open(token_path, 'r') as file:
             for line in file:
                 if ''.join(char for char in line.strip() if char.isalpha()) == "H":
@@ -90,6 +105,7 @@ class VideoAudioPhonemeDataset(Dataset):
                     tokens.append(self.phonemes.index(''.join(char for char in line.strip() if char.isalpha())))
 
         return {
+            #'flows': torch.tensor(flow, dtype=torch.float32),
             'video': video,
             'audio': zeroPaddedAudio,
             'phonemes': F.pad(torch.tensor([key for key, _ in groupby(tokens)]), (0, 250-torch.tensor([key for key, _ in groupby(tokens)]).shape[0])),
