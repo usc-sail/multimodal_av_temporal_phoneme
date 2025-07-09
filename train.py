@@ -148,9 +148,7 @@ for t in range(epochs):
                     if targets[i,j].item() != 0:
                         ref.append(targets[i,j].item())
                 hyp = [key for key, _ in groupby(hyp)]
-                ref_str = " ".join(map(str, ref))
-                hyp_str = " ".join(map(str, hyp))
-                per_numerator = per_numerator + Levenshtein.distance(ref_str, hyp_str)
+                per_numerator = per_numerator + Levenshtein.distance(ref, hyp)
                 per_denominator = per_denominator + len(ref)
                 
 
