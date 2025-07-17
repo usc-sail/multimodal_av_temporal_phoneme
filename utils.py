@@ -78,9 +78,7 @@ class PhonemeErrorRate:
             self.decoded_refs.append(ref_seq)
             self.decoded_hyps.append(hyp_seq)
 
-            ref_str = ' '.join(ref_seq)
-            hyp_str = ' '.join(hyp_seq)
-            dist = levenshtein_distance(ref_str, hyp_str)
+            dist = levenshtein_distance(ref_seq, hyp_seq)
 
             self.total_edits += dist
             self.total_ref_phonemes += len(ref_seq)
