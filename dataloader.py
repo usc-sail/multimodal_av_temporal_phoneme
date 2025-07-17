@@ -30,15 +30,15 @@ class VideoAudioPhonemeDataset(Dataset):
         all_token_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_tokens"))) if f.endswith('.txt')]
         sample_quantity = 0
         if training:
-            all_video_files = all_video_files[0:137583]
-            all_audio_files = all_audio_files[0:137583]
-            all_token_files = all_token_files[0:137583]
-            sample_quantity = 8
+            all_video_files = all_video_files[0:24691]
+            all_audio_files = all_audio_files[0:24691]
+            all_token_files = all_token_files[0:24691]
+            sample_quantity = 8000
         else:
-            all_video_files = all_video_files[137583:]
-            all_audio_files = all_audio_files[137583:]
-            all_token_files = all_token_files[137583:]
-            sample_quantity = 8
+            all_video_files = all_video_files[24691:]
+            all_audio_files = all_audio_files[24691:]
+            all_token_files = all_token_files[24691:]
+            sample_quantity = 1000
         indices = random.sample(range(len(all_video_files)), sample_quantity)
         
         #Since the dataset of 5 second sequences is too large, randomly choose 10000 of them.
