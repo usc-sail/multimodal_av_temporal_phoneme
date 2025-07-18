@@ -384,7 +384,7 @@ class rtMRI_Encoder(nn.Module):
 
         # Modality type: 'audio', 'video', or 'multimodal'
         self.audio_dim = 1024
-        self.vid_dim = 384
+        self.vid_dim = 768
         self.modality = modality
 
         if modality == 'a': # audio only
@@ -425,7 +425,8 @@ class rtMRI_Encoder(nn.Module):
             b = video_features.shape[0]
             t = video_features.shape[1]
             ai_feas = rearrange(video_features, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
-            x = self.visual_model(ai_feas) #Shape: [batch_size* 250, 1024]
+            x = self.get_visual_model(ai_feas).logits #Shape: [batch_size* 250, 1024]
+            # assert False, x
             x = rearrange(x, '(b t) e -> b t e', b=b, t=t)  #Shape: [batch_size, 250, 1024]
         else:  # multimodal
             x = torch.cat([audio_features, video_features], dim=-1)
@@ -447,3 +448,13 @@ class rtMRI_Encoder(nn.Module):
 
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
         return log_probs
+    
+    def get_visual_model(self, input):
+        from transformers import ViTImageProcessor, ViTForImageClassification
+        processor = ViTImageProcessor.from_pretrained('google/vit-base-patch16-224')
+        model = ViTForImageClassification.from_pretrained('google/vit-base-patch16-224').cuda()
+        inputs = processor(images=input, return_tensors="pt")
+        model.classifier = torch.nn.Identity()  # Remove the classification head
+        return model(inputs['pixel_values'].cuda())
+
+

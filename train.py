@@ -34,10 +34,10 @@ video_model = raft_large(pretrained=True, progress=False).cuda()
 video_model = video_model.eval()
 
 #Initialize our training parameters
-finalModel = rtMRI_Encoder(modality="a").cuda()
-optimizer = torch.optim.Adam(finalModel.parameters(), lr=1e-2, weight_decay=1e-4)
+finalModel = rtMRI_Encoder(modality="i").cuda()
+optimizer = torch.optim.Adam(finalModel.parameters(), lr=1e-3, weight_decay=1e-4)
 lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=20, gamma=0.9)
-loss_function = nn.CTCLoss(blank=0, zero_infinity=True)
+loss_function = nn.CTCLoss(blank=0, reduction='mean', zero_infinity=True)
 
 #Setup for model evaluation
 def eval_step(engine, batch):
@@ -47,8 +47,8 @@ for t in range(epochs):
     epoch_loss = 0.0
     num_batches = 0
     print(f"Epoch {t+1}\n-------------------------------")
-    with open('training_output.txt', 'a') as file:
-        file.write(f"Epoch {t+1}\n-------------------------------\n")
+    # with open('training_output.txt', 'a') as file:
+    #     file.write(f"Epoch {t+1}\n-------------------------------\n")
     for index, batch in enumerate(train_loader):
         finalModel.train()
         optimizer.zero_grad()
@@ -63,13 +63,6 @@ for t in range(epochs):
             #audio_features = audio_features_model(audio_inputs[0])
             audio_features = audio_features_model(audio_values['input_values'][0,:,:].cuda()).last_hidden_state #Shape: [batch_size, time_steps, 1024]
         
-        #Acquire video features
-        # list_of_flows = torch.rand(batch_length, 250, 2, 128, 128).to(device)
-        # for i in range(batch_length):
-        #     with torch.no_grad():
-        #         list_of_flows[i,:,:,:,:] = video_model(videos[i,::2, :, :, :].permute(0, 3, 1, 2).to(device), videos[i,1::2, :, :, :].permute(0, 3, 1, 2).to(device))[-1]
-        # list_of_flows = torch.flatten(list_of_flows, start_dim=2)
-
         log_probs = finalModel(audio_features, videos[:,::2,:], 1024) #Shape: [batch_size, 250, 40]
         # Prepare input and target lengths (all sequences are length 250 in your case)
         input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)
@@ -79,7 +72,7 @@ for t in range(epochs):
                 target_lengths)
         loss.backward()
         
-        torch.nn.utils.clip_grad_norm_(finalModel.parameters(), max_norm=0.5)
+        torch.nn.utils.clip_grad_norm_(finalModel.parameters(), max_norm=1.0)
         optimizer.step()
 
         epoch_loss += loss.item()
@@ -95,9 +88,7 @@ for t in range(epochs):
     train_per.reset()
     avg_epoch_loss = epoch_loss / num_batches
     print(f"PER on Training data: {PER:>7f} and Average epoch loss: {avg_epoch_loss:>7f}")
-    # with open('training_output.txt', 'a') as file:
-    #     file.write(f"Average epoch loss: {avg_epoch_loss:>7f}\n")
-    # print("Calculating test loss...")
+
     lr_scheduler.step()
     
     #Evaluate the model on the test set
@@ -131,14 +122,8 @@ for t in range(epochs):
             val_per.add_batch(log_probs, targets)
 
     avg_loss = total_loss / num_batches
-    # print(f"Average loss of testing dataset: {avg_loss:>7f}")
-    # with open('training_output.txt', 'a') as file:
-    #     file.write(f"Average loss of testing dataset: {avg_loss:>7f}\n")
-
-    # PER = per_numerator/per_denominator
     PER, edits, total = val_per.compute()
     val_per.save('val_pred.json')
     val_per.reset()
     print(f"PER on testing data: {PER:>7f} and Average loss of testing dataset: {avg_loss:>7f}")
-    # with open('training_output.txt', 'a') as file:
-    #     file.write(f"PER on testing data: {PER:>7f}\n")
+
