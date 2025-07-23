@@ -2,22 +2,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# import torchvision
-# import torchaudio
 from torchaudio.utils import download_asset
 from torch.utils.data import Dataset, DataLoader
-# import IPython
 import matplotlib.pyplot as plt
-# import os
-# import random
-# import sys
 import numpy as np
-# import cv2
 from typing import Optional, Tuple
-# from itertools import groupby
-# import Levenshtein
 from vision_transformer import VisionTransformer, partial
 from einops import rearrange
+import torchvision.models as models
 
 def _lengths_to_padding_mask(lengths: torch.Tensor) -> torch.Tensor:
     batch_size = lengths.shape[0]
@@ -369,16 +361,53 @@ class AV_Conformer(nn.Module):
 
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
         return log_probs
-    
+
+class SmallFlowEncoder(nn.Module):
+    def __init__(self, output_dim=192):
+        super().__init__()
+        # Use pretrained or reduced ResNet (remove final FC)
+        base_resnet = models.resnet18(pretrained=False)
+        self.feature_extractor = nn.Sequential(*list(base_resnet.children())[:-1])  # [B, 512, 1, 1]
+        self.fc = nn.Linear(512, output_dim)
+
+    def forward(self, flow_seq):
+        """
+        Args:
+            flow_seq: [T, 2, W, H] or [B, T, 2, W, H]
+        Returns:
+            embeddings: [T, output_dim] or [B, T, output_dim]
+        """
+        if flow_seq.dim() == 4:  # [T, 2, W, H]
+            T = flow_seq.shape[0]
+            x = self._prepare_input(flow_seq)  # [T, 3, W, H]
+            features = self.feature_extractor(x).squeeze(-1).squeeze(-1)  # [T, 512]
+            return self.fc(features)  # [T, output_dim]
+
+        elif flow_seq.dim() == 5:  # [B, T, 2, W, H]
+            B, T, W, H, _ = flow_seq.shape
+            flow_seq = flow_seq.reshape(B * T, 2, W, H)
+            x = self._prepare_input(flow_seq)  # [B*T, 3, W, H]
+            features = self.feature_extractor(x).squeeze(-1).squeeze(-1)  # [B*T, 512]
+            features = self.fc(features).reshape(B, T, -1)  # [B, T, output_dim]
+            return features
+
+    def _prepare_input(self, flow):
+        # Pad to 3 channels: [N, 2, W, H] → [N, 3, W, H]
+        N, C, W, H = flow.shape
+        if C == 2:
+            pad = torch.zeros((N, 1, W, H), device=flow.device)
+            flow = torch.cat([flow, pad], dim=1)
+        return flow
+
 class rtMRI_Encoder(nn.Module):
     def __init__(self, 
-                 modality='a', 
+                 modality='f', 
                  feats='base', 
                  patch_size=8, 
                  depth=12, 
                  num_heads=6, 
                  mlp_ratio=4,
-                 sequence_model='lstm'):
+                 sequence_model='mamba'):
         
         super().__init__()
 
@@ -393,16 +422,26 @@ class rtMRI_Encoder(nn.Module):
             input_dim = self.vid_dim
             # self.motion_model = VisionTransformer(in_chans=2, patch_size=patch_size, embed_dim=384, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
             self.visual_model = VisionTransformer(in_chans=3, patch_size=patch_size, embed_dim=self.vid_dim, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
+        elif modality == 'f': # optical flow only
+            self.flow_model = SmallFlowEncoder()
+            input_dim = 192
         else:
             input_dim = self.audio_dim + self.vid_dim
     
         # LSTM decoder
+        from mamba_ssm import Mamba
         self.sequence_model = nn.LSTM(
             input_size=input_dim,
             hidden_size=128,
             num_layers=1,
             batch_first=True,
-        ) if sequence_model == 'lstm' else None
+        ) if sequence_model == 'lstm' else Mamba(
+            # This module uses roughly 3 * expand * d_model^2 parameters
+            d_model=192, # Model dimension d_model
+            d_state=16,  # SSM state expansion factor
+            d_conv=4,    # Local convolution width
+            expand=2,    # Block expansion factor
+        ).to("cuda")
 
         #Define relu activation function
         self.relu = nn.ReLU()
@@ -410,7 +449,7 @@ class rtMRI_Encoder(nn.Module):
         # Final classification layer
         self.classifier = nn.Linear(input_dim, 40)
 
-    def forward(self, audio_features, video_features, feat_lengths):
+    def forward(self, audio_features, video_features, flows, feat_lengths):
         """
         args:
             audio_features: Tensor of shape [batch_size, 250, 1024] 
@@ -428,6 +467,12 @@ class rtMRI_Encoder(nn.Module):
             x = self.get_visual_model(ai_feas).logits #Shape: [batch_size* 250, 1024]
             # assert False, x
             x = rearrange(x, '(b t) e -> b t e', b=b, t=t)  #Shape: [batch_size, 250, 1024]
+        elif self.modality == 'f':
+            # Flow shape of [batch_size, num_frames, H, W, 2]
+            b, t = flows.shape[0], flows.shape[1]
+            x = rearrange(flows, 'b t w h c -> (b t) c w h')
+            x = self.flow_model(x)
+            x = rearrange(x, '(b t) e -> b t e', b=b, t=t)
         else:  # multimodal
             x = torch.cat([audio_features, video_features], dim=-1)
 
@@ -441,10 +486,10 @@ class rtMRI_Encoder(nn.Module):
         #print(reps.shape)
 
         # Decode with LSTM
-        # x, _ = self.sequence_model(x)  # Shape: [batch_size, seq_len, lstm_dim]
+        x = self.sequence_model(x)  # Shape: [batch_size, seq_len = 250, hidden_dim]
 
         # Classification
-        logits = self.classifier(x)  # Shape: [batch_size, 250, 40]
+        logits = self.classifier(x)  # Shape: [batch_size, seq_len = 250, classes = 40]
 
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
         return log_probs
@@ -456,5 +501,7 @@ class rtMRI_Encoder(nn.Module):
         inputs = processor(images=input, return_tensors="pt")
         model.classifier = torch.nn.Identity()  # Remove the classification head
         return model(inputs['pixel_values'].cuda())
+
+
 
 

@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/data2/hongn/multimodal_av_temporal_phoneme/train.py", line 26, in <module>
+    train_loader, test_loader = get_dataset(video_directory, batch_length)
+  File "/data2/hongn/multimodal_av_temporal_phoneme/utils.py", line 8, in get_dataset
+    train_set = VideoAudioPhonemeDataset(video_directory, training=True)
+  File "/data2/hongn/multimodal_av_temporal_phoneme/dataloader.py", line 55, in __init__
+    self.flows_files = all_of_files[indices]
+TypeError: list indices must be integers or slices, not list

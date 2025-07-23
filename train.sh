@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES=2 python train.py
+CUDA_VISIBLE_DEVICES=2 python train.py > train.log 2>&1 &

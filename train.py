@@ -34,7 +34,7 @@ video_model = raft_large(pretrained=True, progress=False).cuda()
 video_model = video_model.eval()
 
 #Initialize our training parameters
-finalModel = rtMRI_Encoder(modality="i").cuda()
+finalModel = rtMRI_Encoder(modality="f").cuda()
 optimizer = torch.optim.Adam(finalModel.parameters(), lr=1e-3, weight_decay=1e-4)
 lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=20, gamma=0.9)
 loss_function = nn.CTCLoss(blank=0, reduction='mean', zero_infinity=True)
@@ -54,6 +54,7 @@ for t in range(epochs):
         optimizer.zero_grad()
         videos = batch["video"].cuda() #Shape: [batch_size, num_frames, H, W, 3]
         audio = batch["audio"] #Shape: [batch_size, num_channels, num_samples]
+        flows = batch["flows"].cuda() #Shape: [batch_size, num_frames, H, W, 2]
         targets = batch["phonemes"].cuda() #Shape: [batch_size, time_steps]
         target_lengths = batch["phoneme_lengths"].cuda() #Shape: [batch_size]
 
@@ -63,7 +64,7 @@ for t in range(epochs):
             #audio_features = audio_features_model(audio_inputs[0])
             audio_features = audio_features_model(audio_values['input_values'][0,:,:].cuda()).last_hidden_state #Shape: [batch_size, time_steps, 1024]
         
-        log_probs = finalModel(audio_features, videos[:,::2,:], 1024) #Shape: [batch_size, 250, 40]
+        log_probs = finalModel(audio_features, videos[:,::2,:], flows, 1024) #Shape: [batch_size, 250, 40]
         # Prepare input and target lengths (all sequences are length 250 in your case)
         input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)
         loss = loss_function(log_probs.transpose(0, 1),  # CTC expects [seq_len, batch, num_classes]
@@ -79,7 +80,7 @@ for t in range(epochs):
         num_batches += 1
 
         train_per.add_batch(log_probs, targets)
-        if index % 12 == 0:
+        if index % 100 == 0:
             loss, current, size = loss.item(), index * batch_length + len(audio), len(train_loader.dataset)
             print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
 
@@ -100,14 +101,14 @@ for t in range(epochs):
     
     with torch.no_grad():
         for batch in test_loader:
-            videos, audio, targets, target_lengths = batch["video"].cuda(), batch["audio"], batch["phonemes"].cuda(), batch["phoneme_lengths"].cuda()
+            videos, audio, targets, target_lengths, flows = batch["video"].cuda(), batch["audio"], batch["phonemes"].cuda(), batch["phoneme_lengths"].cuda(), batch["flows"].cuda() #Shape: [batch_size, num_frames, H, W, 3], [batch_size, num_channels, num_samples], [batch_size, time_steps], [batch_size], [batch_size, num_frames, H, W, 2]
 
             #Acquire audio features
             audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt", padding=True)
             audio_features = audio_features_model(audio_values['input_values'][0,:,:].cuda()).last_hidden_state #Shape: [batch_size, time_steps, 1024]
 
             # log_probs = finalModel(audio_features, list_of_flows, 1024) #Shape: [batch_size, 250, 40]
-            log_probs = finalModel(audio_features, videos[:,::2,:], 1024) #Shape: [batch_size, 250, 40]
+            log_probs = finalModel(audio_features, videos[:,::2,:], flows,  1024) #Shape: [batch_size, 250, 40]
 
             # Prepare input and target lengths (all sequences are length 250 in your case)
             input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)
