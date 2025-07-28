@@ -20,7 +20,7 @@ import glob
 import torchvision.models as models
 
 class VideoAudioPhonemeDataset(Dataset):
-    def __init__(self, root_dir, transform=None, training=True, modality="avf"):
+    def __init__(self, root_dir, transform=None, training=True, modality="f"):
         """
         Args:
             root_dir (str): Path to the directory containing video, audio and text files.
@@ -95,13 +95,13 @@ class VideoAudioPhonemeDataset(Dataset):
 
     def __getitem__(self, idx):
         #Fetch video
-        # video, audio, flows = 0, 0, 0
-        # if('i' in self.modality):
-        video = self.get_video(self.video_files[idx])
-        # if('a' in self.modality):
-        audio = self.get_audio(self.audio_files[idx])
-        # if('f' in self.modality):
-        flows = self.get_optical_flow(self.flows_files[idx])
+        video, audio, flows = 0, 0, 0
+        if('i' in self.modality):
+            video = self.get_video(self.video_files[idx])
+        if('a' in self.modality):
+            audio = self.get_audio(self.audio_files[idx])
+        if('f' in self.modality):
+            flows = self.get_optical_flow(self.flows_files[idx])
 
         # Fetch label tokens, The tokens are in the form of phonemes, so we need to convert them to indices
         token_path = os.path.join(self.root_dir, "five_second_tokens_1", self.token_files[idx])

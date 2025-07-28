@@ -4,9 +4,9 @@ import torch
 from Levenshtein import distance as levenshtein_distance
 import json
 
-def get_dataset(video_directory, batch_size):
-    train_set = VideoAudioPhonemeDataset(video_directory, training=True)
-    test_set = VideoAudioPhonemeDataset(video_directory, training=False)
+def get_dataset(video_directory, batch_size, modality="f"):
+    train_set = VideoAudioPhonemeDataset(video_directory, training=True, modality=modality)
+    test_set = VideoAudioPhonemeDataset(video_directory, training=False, modality=modality)
 
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4)
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=4)

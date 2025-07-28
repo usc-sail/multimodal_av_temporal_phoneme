@@ -423,7 +423,8 @@ class rtMRI_Encoder(nn.Module):
             # self.motion_model = VisionTransformer(in_chans=2, patch_size=patch_size, embed_dim=384, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
             self.visual_model = VisionTransformer(in_chans=3, patch_size=patch_size, embed_dim=self.vid_dim, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
         elif modality == 'f': # optical flow only
-            self.flow_model = SmallFlowEncoder()
+            import vision_transformer as vits
+            self.flow_model = VisionTransformer(in_chans=2, patch_size=patch_size, embed_dim=192, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))#SmallFlowEncoder()
             input_dim = 192
         else:
             input_dim = self.audio_dim + self.vid_dim
@@ -437,11 +438,11 @@ class rtMRI_Encoder(nn.Module):
             batch_first=True,
         ) if sequence_model == 'lstm' else Mamba(
             # This module uses roughly 3 * expand * d_model^2 parameters
-            d_model=192, # Model dimension d_model
+            d_model=input_dim, # Model dimension d_model
             d_state=16,  # SSM state expansion factor
             d_conv=4,    # Local convolution width
             expand=2,    # Block expansion factor
-        ).to("cuda")
+        )
 
         #Define relu activation function
         self.relu = nn.ReLU()
@@ -449,7 +450,7 @@ class rtMRI_Encoder(nn.Module):
         # Final classification layer
         self.classifier = nn.Linear(input_dim, 40)
 
-    def forward(self, audio_features, video_features, flows, feat_lengths):
+    def forward(self, batch, feat_lengths):
         """
         args:
             audio_features: Tensor of shape [batch_size, 250, 1024] 
@@ -459,20 +460,25 @@ class rtMRI_Encoder(nn.Module):
                 log_probs: Tensor of shape [batch_size, 250, 40] containing log probabilities for each class
         """
         if self.modality == 'a':
-            x = audio_features #Shape: [batch_size, 250, 1024]
+            x = batch["audio"] #Shape: [batch_size, 250, 1024]
+            audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt", padding=True)
+            audio_features = audio_features_model(audio_values['input_values'][0,:,:].cuda()).last_hidden_state
         elif self.modality == 'i':
-            b = video_features.shape[0]
-            t = video_features.shape[1]
-            ai_feas = rearrange(video_features, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
+            video = batch["video"][:,::2,:].cuda()
+            b = video.shape[0]
+            t = video.shape[1]
+            ai_feas = rearrange(video, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
             x = self.get_visual_model(ai_feas).logits #Shape: [batch_size* 250, 1024]
             # assert False, x
             x = rearrange(x, '(b t) e -> b t e', b=b, t=t)  #Shape: [batch_size, 250, 1024]
         elif self.modality == 'f':
-            # Flow shape of [batch_size, num_frames, H, W, 2]
+            flows = batch["flows"].cuda()  # Shape: [batch_size, num_frames, H, W, 2]
             b, t = flows.shape[0], flows.shape[1]
             x = rearrange(flows, 'b t w h c -> (b t) c w h')
+            x = F.interpolate(x, size=(128, 128), mode='bilinear', align_corners=False)
             x = self.flow_model(x)
             x = rearrange(x, '(b t) e -> b t e', b=b, t=t)
+            # print(f"Using flow/ model, {x.shape}")
         else:  # multimodal
             x = torch.cat([audio_features, video_features], dim=-1)
 
@@ -486,7 +492,7 @@ class rtMRI_Encoder(nn.Module):
         #print(reps.shape)
 
         # Decode with LSTM
-        x = self.sequence_model(x)  # Shape: [batch_size, seq_len = 250, hidden_dim]
+        # x = self.sequence_model(x)  # Shape: [batch_size, seq_len = 250, hidden_dim]
 
         # Classification
         logits = self.classifier(x)  # Shape: [batch_size, seq_len = 250, classes = 40]
@@ -501,6 +507,15 @@ class rtMRI_Encoder(nn.Module):
         inputs = processor(images=input, return_tensors="pt")
         model.classifier = torch.nn.Identity()  # Remove the classification head
         return model(inputs['pixel_values'].cuda())
+    
+    def preprocess_audio(self, audio):
+        from transformers import Wav2Vec2Processor
+        processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-lv-60-espeak-cv-ft")
+        audio_features_model = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-lv-60-espeak-cv-ft").cuda()
+        audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt", padding=True)
+        with torch.no_grad():
+            #audio_features = audio_features_model(audio_inputs[0])
+            audio_features = audio_features_model(audio_values['input_values'][0,:,:].cuda()).last_hidden_state
 
 
 
