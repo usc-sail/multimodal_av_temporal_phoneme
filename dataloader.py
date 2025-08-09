@@ -1,62 +1,52 @@
 #General libraries needed for model training/evaluation
 import torch
 import torch.nn.functional as F
-# import torchvision
 import torchaudio
-# from torchaudio.utils import download_asset
 from torch.utils.data import Dataset, DataLoader
-# import IPython
-# import matplotlib.pyplot as plt
 import os
 import random
-# import sys
 import numpy as np
 import cv2
-# from typing import Optional, Tuple
 from itertools import groupby
-# import Levenshtein
 from einops import rearrange
-import glob
-import torchvision.models as models
 
 class VideoAudioPhonemeDataset(Dataset):
-    def __init__(self, root_dir, transform=None, training=True, modality="f"):
+    def __init__(self, root_dir, transform=None, training=True):
         """
         Args:
             root_dir (str): Path to the directory containing video, audio and text files.
             transform (callable, optional): Transform for video frames.
         """
         self.root_dir = root_dir
-        self.modality = modality
-        all_of_files = glob.glob(root_dir + "/five_second_of_1/*.npy")
-        all_video_files = glob.glob(root_dir + "/avi/five_second_clips_1/*.avi") 
-        all_audio_files = glob.glob(root_dir + "/five_second_audio_1/*.wav") 
-        all_token_files = glob.glob(root_dir + "/five_second_tokens_1/*.txt") 
+        all_articulator_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_articulators_1"))) if f.endswith('.npy')]
+        #all_video_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_clips_1"))) if f.endswith('.avi')]
+        all_audio_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_audio_1"))) if f.endswith('.wav')]
+        all_token_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_tokens_1"))) if f.endswith('.txt')]
         sample_quantity = 0
         if training:
-            all_of_files = all_of_files[0:800]
-            all_video_files = all_video_files[0:800]
-            all_audio_files = all_audio_files[0:800]
-            all_token_files = all_token_files[0:800]
-            sample_quantity = 800
+            #For CARC:
+            all_articulator_files = all_articulator_files[0:931]
+            #all_video_files = all_video_files[0:931]
+            all_audio_files = all_audio_files[0:931]
+            all_token_files = all_token_files[0:931]
+            sample_quantity = 931
         else:
-            all_of_files = all_of_files[800:1001]
-            all_video_files = all_video_files[800:1001]
-            all_audio_files = all_audio_files[800:1001]
-            all_token_files = all_token_files[800:1001]
-            sample_quantity = 200
-        indices = random.sample(range(len(all_video_files)), sample_quantity)
-
-
+            #For CARC:
+            all_articulator_files = all_articulator_files[931:]
+            #all_video_files = all_video_files[931:]
+            all_audio_files = all_audio_files[931:]
+            all_token_files = all_token_files[931:]
+            sample_quantity = 293
+        indices = random.sample(range(len(all_audio_files)), sample_quantity)
+        
         #Since the dataset of 5 second sequences is too large, randomly choose 10000 of them.
-        self.flows_files = []
-        self.video_files = []
+        self.articulator_files = []
+        #self.video_files = []
         self.audio_files = []
         self.token_files = []
-        # self.flows_files = all_of_files[indices]
         for i in indices:
-            self.flows_files.append(all_of_files[i])
-            self.video_files.append(all_video_files[i])
+            self.articulator_files.append(all_articulator_files[i])
+            #self.video_files.append(all_video_files[i])
             self.audio_files.append(all_audio_files[i])
             self.token_files.append(all_token_files[i])
 
@@ -65,9 +55,16 @@ class VideoAudioPhonemeDataset(Dataset):
                     'T', 'TH', 'V', 'W', 'Y', 'Z', 'ZH']
 
     def __len__(self):
-        return len(self.video_files)
+        return len(self.audio_files)
 
-    def get_video(self, video_path):
+    def __getitem__(self, idx):
+        #Fetch articulator features
+        articulator_path = os.path.join(self.root_dir, "five_second_articulators_1", self.articulator_files[idx])
+        articulator = np.load(articulator_path)
+        articulator = np.concatenate((articulator[::2, :], articulator[1::2, :]), axis=1)
+        
+        #Fetch video
+        '''video_path = os.path.join(self.root_dir, "five_second_clips_1", self.video_files[idx])
         cap = cv2.VideoCapture(video_path)
         frames = []
         while True:
@@ -77,36 +74,20 @@ class VideoAudioPhonemeDataset(Dataset):
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frames.append(cv2.resize(frame, (128, 128)))
         video = torch.tensor(np.array(frames), dtype=torch.float32)
-        video = rearrange(video, 't h w c -> t c h w')  # Rearrange to (T, C, H, W)
-        return video
-
-    def get_audio(self, audio_path):
+        video = rearrange(video, 't h w c -> t c h w')
+        cap.release()'''
+        
         #Fetch audio
+        audio_path = os.path.join(self.root_dir, "five_second_audio_1", self.audio_files[idx])
         audio, sr = torchaudio.load(audio_path)
         #if sr != 16000:
         #    audio = torchaudio.transforms.Resample(sr, 16000)(audio)
         zeroPaddedAudio = torch.zeros(1, 80320)
         zeroPaddedAudio[:,0:80000] = audio[:,0:80000]
-        return zeroPaddedAudio
-    
-    def get_optical_flow(self, of_path):
-        flows = np.load(of_path)
-        return torch.Tensor(flows).float()
 
-    def __getitem__(self, idx):
-        #Fetch video
-        video, audio, flows = 0, 0, 0
-        if('i' in self.modality):
-            video = self.get_video(self.video_files[idx])
-        if('a' in self.modality):
-            audio = self.get_audio(self.audio_files[idx])
-        if('f' in self.modality):
-            flows = self.get_optical_flow(self.flows_files[idx])
-
-        # Fetch label tokens, The tokens are in the form of phonemes, so we need to convert them to indices
+        # Fetch tokens
         token_path = os.path.join(self.root_dir, "five_second_tokens_1", self.token_files[idx])
         tokens = []
-
         with open(token_path, 'r') as file:
             for line in file:
                 if ''.join(char for char in line.strip() if char.isalpha()) == "H":
@@ -115,9 +96,9 @@ class VideoAudioPhonemeDataset(Dataset):
                     tokens.append(self.phonemes.index(''.join(char for char in line.strip() if char.isalpha())))
 
         return {
-            'video': video,
-            'audio': audio,
-            'flows': flows,
+            #'video': video,
+            'articulator': torch.tensor(articulator, dtype=torch.float32),
+            'audio': zeroPaddedAudio,
             'phonemes': F.pad(torch.tensor([key for key, _ in groupby(tokens)]), (0, 250-torch.tensor([key for key, _ in groupby(tokens)]).shape[0])),
             'phoneme_lengths': torch.tensor(len([key for key, _ in groupby(tokens)]))
         }
