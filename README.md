@@ -1,16 +1,18 @@
 Prerequisite libraries:
-> torch
-> torchaudio
--torchvision
--matplotlib
--numpy
--cv2
--transformers
--Levenshtein
--IPython
--transformers
--einops
--mambapy
+```
+torch
+torchaudio
+torchvision
+matplotlib
+numpy
+cv2
+transformers
+Levenshtein
+IPython
+transformers
+einops
+mambapy
+```
 
 Commands to setup CARC environment:
 ```
