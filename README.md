@@ -25,4 +25,6 @@ module load nano
 ```
 
 Command to start training:
--python train.py
+```
+python train.py
+```
