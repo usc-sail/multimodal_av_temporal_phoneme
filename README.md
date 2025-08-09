@@ -1,6 +1,6 @@
 Prerequisite libraries:
--torch
--torchaudio
+> torch
+> torchaudio
 -torchvision
 -matplotlib
 -numpy
