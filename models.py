@@ -7,9 +7,9 @@ from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Optional, Tuple
+from mambapy.mamba import Mamba, MambaConfig
 from vision_transformer import VisionTransformer, partial
 from einops import rearrange
-import torchvision.models as models
 
 def _lengths_to_padding_mask(lengths: torch.Tensor) -> torch.Tensor:
     batch_size = lengths.shape[0]
@@ -361,96 +361,48 @@ class AV_Conformer(nn.Module):
 
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
         return log_probs
-
-class SmallFlowEncoder(nn.Module):
-    def __init__(self, output_dim=192):
-        super().__init__()
-        # Use pretrained or reduced ResNet (remove final FC)
-        base_resnet = models.resnet18(pretrained=False)
-        self.feature_extractor = nn.Sequential(*list(base_resnet.children())[:-1])  # [B, 512, 1, 1]
-        self.fc = nn.Linear(512, output_dim)
-
-    def forward(self, flow_seq):
-        """
-        Args:
-            flow_seq: [T, 2, W, H] or [B, T, 2, W, H]
-        Returns:
-            embeddings: [T, output_dim] or [B, T, output_dim]
-        """
-        if flow_seq.dim() == 4:  # [T, 2, W, H]
-            T = flow_seq.shape[0]
-            x = self._prepare_input(flow_seq)  # [T, 3, W, H]
-            features = self.feature_extractor(x).squeeze(-1).squeeze(-1)  # [T, 512]
-            return self.fc(features)  # [T, output_dim]
-
-        elif flow_seq.dim() == 5:  # [B, T, 2, W, H]
-            B, T, W, H, _ = flow_seq.shape
-            flow_seq = flow_seq.reshape(B * T, 2, W, H)
-            x = self._prepare_input(flow_seq)  # [B*T, 3, W, H]
-            features = self.feature_extractor(x).squeeze(-1).squeeze(-1)  # [B*T, 512]
-            features = self.fc(features).reshape(B, T, -1)  # [B, T, output_dim]
-            return features
-
-    def _prepare_input(self, flow):
-        # Pad to 3 channels: [N, 2, W, H] → [N, 3, W, H]
-        N, C, W, H = flow.shape
-        if C == 2:
-            pad = torch.zeros((N, 1, W, H), device=flow.device)
-            flow = torch.cat([flow, pad], dim=1)
-        return flow
-
+    
 class rtMRI_Encoder(nn.Module):
     def __init__(self, 
-                 modality='f', 
+                 modality='a', 
                  feats='base', 
                  patch_size=8, 
                  depth=12, 
                  num_heads=6, 
                  mlp_ratio=4,
-                 sequence_model='mamba'):
+                 sequence_model='lstm'):
         
         super().__init__()
 
         # Modality type: 'audio', 'video', or 'multimodal'
         self.audio_dim = 1024
-        self.vid_dim = 768
+        self.vid_dim = 384
         self.modality = modality
 
         if modality == 'a': # audio only
             input_dim = self.audio_dim 
-        elif modality == 'i': # audio + image
+        elif modality == 'ai': # audio + image
             input_dim = self.vid_dim
             # self.motion_model = VisionTransformer(in_chans=2, patch_size=patch_size, embed_dim=384, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
             self.visual_model = VisionTransformer(in_chans=3, patch_size=patch_size, embed_dim=self.vid_dim, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
-        elif modality == 'f': # optical flow only
-            import vision_transformer as vits
-            self.flow_model = VisionTransformer(in_chans=2, patch_size=patch_size, embed_dim=192, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))#SmallFlowEncoder()
-            input_dim = 192
         else:
             input_dim = self.audio_dim + self.vid_dim
     
         # LSTM decoder
-        from mamba_ssm import Mamba
         self.sequence_model = nn.LSTM(
             input_size=input_dim,
             hidden_size=128,
             num_layers=1,
             batch_first=True,
-        ) if sequence_model == 'lstm' else Mamba(
-            # This module uses roughly 3 * expand * d_model^2 parameters
-            d_model=input_dim, # Model dimension d_model
-            d_state=16,  # SSM state expansion factor
-            d_conv=4,    # Local convolution width
-            expand=2,    # Block expansion factor
-        )
+        ) if sequence_model == 'lstm' else None
 
         #Define relu activation function
         self.relu = nn.ReLU()
 
         # Final classification layer
-        self.classifier = nn.Linear(input_dim, 40)
+        self.classifier = nn.Linear(128, 40)
 
-    def forward(self, batch, feat_lengths):
+    def forward(self, audio_features, video_features, feat_lengths):
         """
         args:
             audio_features: Tensor of shape [batch_size, 250, 1024] 
@@ -460,25 +412,13 @@ class rtMRI_Encoder(nn.Module):
                 log_probs: Tensor of shape [batch_size, 250, 40] containing log probabilities for each class
         """
         if self.modality == 'a':
-            x = batch["audio"] #Shape: [batch_size, 250, 1024]
-            audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt", padding=True)
-            audio_features = audio_features_model(audio_values['input_values'][0,:,:].cuda()).last_hidden_state
-        elif self.modality == 'i':
-            video = batch["video"][:,::2,:].cuda()
-            b = video.shape[0]
-            t = video.shape[1]
-            ai_feas = rearrange(video, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
-            x = self.get_visual_model(ai_feas).logits #Shape: [batch_size* 250, 1024]
-            # assert False, x
+            x = audio_features #Shape: [batch_size, 250, 1024]
+        elif self.modality == 'ai':
+            b = video_features.shape[0]
+            t = video_features.shape[1]
+            ai_feas = rearrange(video_features, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
+            x = self.visual_model(ai_feas) #Shape: [batch_size* 250, 1024]
             x = rearrange(x, '(b t) e -> b t e', b=b, t=t)  #Shape: [batch_size, 250, 1024]
-        elif self.modality == 'f':
-            flows = batch["flows"].cuda()  # Shape: [batch_size, num_frames, H, W, 2]
-            b, t = flows.shape[0], flows.shape[1]
-            x = rearrange(flows, 'b t w h c -> (b t) c w h')
-            x = F.interpolate(x, size=(128, 128), mode='bilinear', align_corners=False)
-            x = self.flow_model(x)
-            x = rearrange(x, '(b t) e -> b t e', b=b, t=t)
-            # print(f"Using flow/ model, {x.shape}")
         else:  # multimodal
             x = torch.cat([audio_features, video_features], dim=-1)
 
@@ -492,31 +432,97 @@ class rtMRI_Encoder(nn.Module):
         #print(reps.shape)
 
         # Decode with LSTM
-        # x = self.sequence_model(x)  # Shape: [batch_size, seq_len = 250, hidden_dim]
+        x, _ = self.sequence_model(x)  # Shape: [batch_size, seq_len, lstm_dim]
 
         # Classification
-        logits = self.classifier(x)  # Shape: [batch_size, seq_len = 250, classes = 40]
+        logits = self.classifier(x)  # Shape: [batch_size, 250, 40]
 
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
         return log_probs
     
-    def get_visual_model(self, input):
-        from transformers import ViTImageProcessor, ViTForImageClassification
-        processor = ViTImageProcessor.from_pretrained('google/vit-base-patch16-224')
-        model = ViTForImageClassification.from_pretrained('google/vit-base-patch16-224').cuda()
-        inputs = processor(images=input, return_tensors="pt")
-        model.classifier = torch.nn.Identity()  # Remove the classification head
-        return model(inputs['pixel_values'].cuda())
-    
-    def preprocess_audio(self, audio):
-        from transformers import Wav2Vec2Processor
-        processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-lv-60-espeak-cv-ft")
-        audio_features_model = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-lv-60-espeak-cv-ft").cuda()
-        audio_values = processor(audio[:,0,:], sampling_rate = 16000, return_tensors="pt", padding=True)
-        with torch.no_grad():
-            #audio_features = audio_features_model(audio_inputs[0])
-            audio_features = audio_features_model(audio_values['input_values'][0,:,:].cuda()).last_hidden_state
+class Articulator_Encoder(nn.Module):
+    def __init__(self, 
+                 modality='audio', 
+                 feats='base', 
+                 patch_size=8, 
+                 depth=12, 
+                 num_heads=6, 
+                 mlp_ratio=4):
+        
+        super().__init__()
 
+        # Modality type: 'audio', 'video', or 'multimodal'
+        self.audio_dim = 1024
+        self.vid_dim = 12
+        self.modality = modality
 
+        if modality == 'audio': # audio only
+            input_dim = self.audio_dim 
+        elif modality == 'articulator': # articulator only
+            input_dim = self.vid_dim
+            # self.motion_model = VisionTransformer(in_chans=2, patch_size=patch_size, embed_dim=384, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
+            self.visual_model = VisionTransformer(in_chans=3, patch_size=patch_size, embed_dim=self.vid_dim, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
+        else:
+            input_dim = self.audio_dim + self.vid_dim
+        
+        #Mamba
+        self.mambaConfig = MambaConfig(d_model=32, n_layers=2)
+        self.mambaModel = Mamba(self.mambaConfig)
 
+        #Convolution layer
+        self.conv1 = nn.Conv1d(12, 32, kernel_size=5, stride=1, padding=2)
 
+        # LSTM decoder
+        self.sequence_model = nn.LSTM(
+            input_size=32,
+            hidden_size=128,
+            num_layers=1,
+            batch_first=True,
+        )
+
+        #Define relu activation function
+        self.relu = nn.ReLU()
+
+        # Final classification layer
+        self.classifier = nn.Linear(128, 40)
+
+    def forward(self, audio_features, video_features, feat_lengths):
+        """
+        args:
+            audio_features: Tensor of shape [batch_size, 250, 1024] 
+            video_features: Tensor of shape [batch_size, 250, 3, 128, 128]
+            feat_lengths: Tensor of shape [batch_size] containing lengths of each sequence
+            returns:
+                log_probs: Tensor of shape [batch_size, 250, 40] containing log probabilities for each class
+        """
+        if self.modality == 'audio':
+            x = audio_features #Shape: [batch_size, 250, 1024]
+        elif self.modality == 'articulator':
+            x = video_features
+            x = rearrange(x, 'b t d -> b d t')
+            x = self.relu(self.conv1(x))
+            x = rearrange(x, 'b d t -> b t d')
+            x = self.mambaModel(x)
+
+            #ai_feas = rearrange(x, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
+            #x = self.visual_model(ai_feas)
+        else:  # multimodal
+            x = torch.cat([audio_features, video_features], dim=-1)
+
+        batch_size = x.shape[0]
+
+        # lengths = torch.full((batch_size,), 250, dtype=torch.long).to(self.device)
+        #lengths = feat_lengths
+
+        # Pass through Conformer
+        #x, reps, att, _ = self.conformer(x, lengths)  # Shape: [batch_size, seq_len, conformer_dim]
+        #print(reps.shape)
+
+        # Decode with LSTM
+        x, _ = self.sequence_model(x)  # Shape: [batch_size, seq_len, lstm_dim]
+
+        # Classification
+        logits = self.classifier(x)  # Shape: [batch_size, 250, 40]
+
+        log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+        return log_probs
