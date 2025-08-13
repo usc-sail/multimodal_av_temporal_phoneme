@@ -61,8 +61,16 @@ class VideoAudioPhonemeDataset(Dataset):
         #Fetch articulator features
         articulator_path = os.path.join(self.root_dir, "five_second_articulators_1", self.articulator_files[idx])
         articulator = np.load(articulator_path)
+        window_size = 3
+        kernel = np.ones(window_size)/window_size
+
+        pad_width = window_size // 2
+        articulator = np.pad(articulator, ((pad_width, window_size - pad_width - 1), (0, 0)), mode='constant')
+        articulator = np.apply_along_axis(
+            lambda m: np.convolve(m, kernel, mode='valid'), axis=0, arr=articulator
+        )
         articulator = np.concatenate((articulator[::2, :], articulator[1::2, :]), axis=1)
-        
+
         #Fetch video
         '''video_path = os.path.join(self.root_dir, "five_second_clips_1", self.video_files[idx])
         cap = cv2.VideoCapture(video_path)

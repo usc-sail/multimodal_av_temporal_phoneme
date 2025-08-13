@@ -453,7 +453,7 @@ class Articulator_Encoder(nn.Module):
 
         # Modality type: 'audio', 'video', or 'multimodal'
         self.audio_dim = 1024
-        self.vid_dim = 12
+        self.vid_dim = 32
         self.modality = modality
 
         if modality == 'audio': # audio only
@@ -461,26 +461,25 @@ class Articulator_Encoder(nn.Module):
         elif modality == 'articulator': # articulator only
             input_dim = self.vid_dim
             # self.motion_model = VisionTransformer(in_chans=2, patch_size=patch_size, embed_dim=384, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
-            self.visual_model = VisionTransformer(in_chans=3, patch_size=patch_size, embed_dim=self.vid_dim, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
         else:
             input_dim = self.audio_dim + self.vid_dim
-        
-        #Mamba
+
+        # Convolution layers
+        self.conv1 = nn.Conv1d(12, 32, kernel_size=5, stride=1, padding=2)
+
+        # Mamba
         self.mambaConfig = MambaConfig(d_model=32, n_layers=2)
         self.mambaModel = Mamba(self.mambaConfig)
 
-        #Convolution layer
-        self.conv1 = nn.Conv1d(12, 32, kernel_size=5, stride=1, padding=2)
-
         # LSTM decoder
         self.sequence_model = nn.LSTM(
-            input_size=32,
+            input_size=input_dim,
             hidden_size=128,
             num_layers=1,
             batch_first=True,
         )
 
-        #Define relu activation function
+        # Define relu activation function
         self.relu = nn.ReLU()
 
         # Final classification layer
@@ -499,6 +498,8 @@ class Articulator_Encoder(nn.Module):
             x = audio_features #Shape: [batch_size, 250, 1024]
         elif self.modality == 'articulator':
             x = video_features
+            x_min, x_max = x.min(), x.max()
+            x = (x-x_min)/(x_max-x_min)
             x = rearrange(x, 'b t d -> b d t')
             x = self.relu(self.conv1(x))
             x = rearrange(x, 'b d t -> b t d')
@@ -507,7 +508,14 @@ class Articulator_Encoder(nn.Module):
             #ai_feas = rearrange(x, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
             #x = self.visual_model(ai_feas)
         else:  # multimodal
-            x = torch.cat([audio_features, video_features], dim=-1)
+            x = video_features
+            x_min, x_max = x.min(), x.max()
+            x = (x-x_min)/(x_max-x_min)
+            x = rearrange(x, 'b t d -> b d t')
+            x = self.relu(self.conv1(x))
+            x = rearrange(x, 'b d t -> b t d')
+            x = self.mambaModel(x)
+            x = torch.cat([audio_features, x], dim=-1)
 
         batch_size = x.shape[0]
 
