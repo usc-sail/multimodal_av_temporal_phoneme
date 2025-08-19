@@ -48,6 +48,8 @@ lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=20
 loss_function = nn.CTCLoss(blank=0, zero_infinity=True)
 train_per = PhonemeErrorRate(phoneme_dictionary, blank_id=0)
 val_per = PhonemeErrorRate(phoneme_dictionary, blank_id=0)
+x_min = torch.tensor(np.array([0.22690388071665196, 0.11955651562837223, 0.17564414476030232, 0.24438938867013488, 0.473685007464924, 0.26225585780008864]), dtype=torch.float).to(device)
+x_max = torch.tensor(np.array([3.5341736387660894, 4.626061521150712, 2.986669440527201, 2.153838267333077, 2.6318475522713562, 2.706900564995662]), dtype=torch.float).to(device)
 
 #Setup for model evaluation
 def eval_step(engine, batch):
@@ -76,7 +78,7 @@ for t in range(epochs):
             #audio_features = audio_features_model(audio_inputs[0])
             audio_features = audio_features_model(audio_values['input_values'][0,:,:]).last_hidden_state #Shape: [batch_size, time_steps, 1024]
 
-        log_probs = finalModel(audio_features, articulators, 1024) #Shape: [batch_size, 250, 40]
+        log_probs = finalModel(audio_features, articulators, 1024, x_min, x_max) #Shape: [batch_size, 250, 40]
         # Prepare input and target lengths (all sequences are length 250 in your case)
         input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)
         #target_lengths = torch.randint(low=1, high=250, size=(batch_length,), dtype=torch.long)
@@ -129,7 +131,7 @@ for t in range(epochs):
             audio_values = audio_processor(audio[:,0,:].to(device), sampling_rate = 16000, return_tensors="pt", padding=True).to(device)
             audio_features = audio_features_model(audio_values['input_values'][0,:,:]).last_hidden_state #Shape: [batch_size, time_steps, 1024]
 
-            log_probs = finalModel(audio_features, articulators, 1024) #Shape: [batch_size, 250, 40]
+            log_probs = finalModel(audio_features, articulators, 1024, x_min, x_max) #Shape: [batch_size, 250, 40]
             
             # Prepare input and target lengths (all sequences are length 250 in your case)
             input_lengths = torch.full(size=(batch_length,), fill_value=250, dtype=torch.long)

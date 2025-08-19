@@ -24,19 +24,29 @@ class VideoAudioPhonemeDataset(Dataset):
         all_token_files = [f for f in sorted(os.listdir(os.path.join(root_dir, "five_second_tokens_1"))) if f.endswith('.txt')]
         sample_quantity = 0
         if training:
-            #For CARC:
-            all_articulator_files = all_articulator_files[0:931]
+            #all_articulator_files = all_articulator_files[0:931]
             #all_video_files = all_video_files[0:931]
-            all_audio_files = all_audio_files[0:931]
-            all_token_files = all_token_files[0:931]
-            sample_quantity = 931
+            #all_audio_files = all_audio_files[0:931]
+            #all_token_files = all_token_files[0:931]
+            #sample_quantity = 931
+
+            all_articulator_files = all_articulator_files[299:]
+            #all_video_files = all_video_files[0:931]
+            all_audio_files = all_audio_files[299:]
+            all_token_files = all_token_files[299:]
+            sample_quantity = 925
         else:
-            #For CARC:
-            all_articulator_files = all_articulator_files[931:]
+            #all_articulator_files = all_articulator_files[931:]
             #all_video_files = all_video_files[931:]
-            all_audio_files = all_audio_files[931:]
-            all_token_files = all_token_files[931:]
-            sample_quantity = 293
+            #all_audio_files = all_audio_files[931:]
+            #all_token_files = all_token_files[931:]
+            #sample_quantity = 293
+
+            all_articulator_files = all_articulator_files[0:299]
+            #all_video_files = all_video_files[931:]
+            all_audio_files = all_audio_files[0:299]
+            all_token_files = all_token_files[0:299]
+            sample_quantity = 299
         indices = random.sample(range(len(all_audio_files)), sample_quantity)
         
         #Since the dataset of 5 second sequences is too large, randomly choose 10000 of them.
@@ -61,15 +71,15 @@ class VideoAudioPhonemeDataset(Dataset):
         #Fetch articulator features
         articulator_path = os.path.join(self.root_dir, "five_second_articulators_1", self.articulator_files[idx])
         articulator = np.load(articulator_path)
-        window_size = 3
-        kernel = np.ones(window_size)/window_size
+        #window_size = 3
+        #kernel = np.ones(window_size)/window_size
 
-        pad_width = window_size // 2
-        articulator = np.pad(articulator, ((pad_width, window_size - pad_width - 1), (0, 0)), mode='constant')
-        articulator = np.apply_along_axis(
-            lambda m: np.convolve(m, kernel, mode='valid'), axis=0, arr=articulator
-        )
-        articulator = np.concatenate((articulator[::2, :], articulator[1::2, :]), axis=1)
+        #pad_width = window_size // 2
+        #articulator = np.pad(articulator, ((pad_width, window_size - pad_width - 1), (0, 0)), mode='constant')
+        #articulator = np.apply_along_axis(
+        #    lambda m: np.convolve(m, kernel, mode='valid'), axis=0, arr=articulator
+        #)
+        #articulator = np.concatenate((articulator[::2, :], articulator[1::2, :]), axis=1)
 
         #Fetch video
         '''video_path = os.path.join(self.root_dir, "five_second_clips_1", self.video_files[idx])

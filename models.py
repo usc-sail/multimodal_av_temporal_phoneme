@@ -453,7 +453,7 @@ class Articulator_Encoder(nn.Module):
 
         # Modality type: 'audio', 'video', or 'multimodal'
         self.audio_dim = 1024
-        self.vid_dim = 32
+        self.vid_dim = 64
         self.modality = modality
 
         if modality == 'audio': # audio only
@@ -465,10 +465,12 @@ class Articulator_Encoder(nn.Module):
             input_dim = self.audio_dim + self.vid_dim
 
         # Convolution layers
-        self.conv1 = nn.Conv1d(12, 32, kernel_size=5, stride=1, padding=2)
+        self.conv1 = nn.Conv1d(6, 64, kernel_size=19, stride=1, padding=9)
+        self.pool1 = nn.MaxPool1d(2)
+        self.conv2 = nn.Conv1d(64, self.vid_dim, kernel_size=19, stride=1, padding=9)
 
         # Mamba
-        self.mambaConfig = MambaConfig(d_model=32, n_layers=2)
+        self.mambaConfig = MambaConfig(d_model=self.vid_dim, n_layers=2)
         self.mambaModel = Mamba(self.mambaConfig)
 
         # LSTM decoder
@@ -485,7 +487,7 @@ class Articulator_Encoder(nn.Module):
         # Final classification layer
         self.classifier = nn.Linear(128, 40)
 
-    def forward(self, audio_features, video_features, feat_lengths):
+    def forward(self, audio_features, video_features, feat_lengths, x_min, x_max):
         """
         args:
             audio_features: Tensor of shape [batch_size, 250, 1024] 
@@ -497,19 +499,27 @@ class Articulator_Encoder(nn.Module):
         if self.modality == 'audio':
             x = audio_features #Shape: [batch_size, 250, 1024]
         elif self.modality == 'articulator':
-            x = video_features
-            x_min, x_max = x.min(), x.max()
-            x = (x-x_min)/(x_max-x_min)
-            x = rearrange(x, 'b t d -> b d t')
-            x = self.relu(self.conv1(x))
-            x = rearrange(x, 'b d t -> b t d')
-            x = self.mambaModel(x)
-
+            x = video_features # [B, 500, 6]
+            #Min and max of channels:
+            #0: 0.22690388071665196, 3.5341736387660894
+            #1: 0.11955651562837223, 4.626061521150712
+            #2: 0.17564414476030232, 2.986669440527201
+            #3: 0.24438938867013488, 2.153838267333077
+            #4: 0.473685007464924, 2.6318475522713562
+            #5: 0.26225585780008864, 2.706900564995662
+            x = (x-x_min)/(x_max-x_min) # [B, 500, 6]
+            x = rearrange(x, 'b t d -> b d t') #[B, 6, 500]
+            x = self.relu(self.conv1(x)) #[B, 64, 500]
+            x = self.pool1(x) #[B, 64, 250]
+            x = self.relu(self.conv2(x)) #[B, 64, 250]
+            x = rearrange(x, 'b d t -> b t d') # [B, 250, 64]
+            x = self.mambaModel(x) # [B, 250, 64]
             #ai_feas = rearrange(x, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
             #x = self.visual_model(ai_feas)
         else:  # multimodal
             x = video_features
-            x_min, x_max = x.min(), x.max()
+            #x_min, x_max = x.min(), x.max()
+            #x_min, x_max = 0.11955651562837223, 4.626061521150712
             x = (x-x_min)/(x_max-x_min)
             x = rearrange(x, 'b t d -> b d t')
             x = self.relu(self.conv1(x))
@@ -527,10 +537,13 @@ class Articulator_Encoder(nn.Module):
         #print(reps.shape)
 
         # Decode with LSTM
-        x, _ = self.sequence_model(x)  # Shape: [batch_size, seq_len, lstm_dim]
+        x, _ = self.sequence_model(x)  # [B, 250, 128]
 
-        # Classification
-        logits = self.classifier(x)  # Shape: [batch_size, 250, 40]
+        #x = torch.cat((x[:,::2,:], x[:,1::2,:]), dim=2)
+
+        # Final Classification
+        logits = self.classifier(x)  # [B, 250, 40]
 
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+
         return log_probs
