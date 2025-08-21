@@ -468,7 +468,8 @@ class Articulator_Encoder(nn.Module):
         self.conv1 = nn.Conv1d(6, 64, kernel_size=19, stride=1, padding=9)
         self.pool1 = nn.MaxPool1d(2)
         self.conv2 = nn.Conv1d(64, self.vid_dim, kernel_size=19, stride=1, padding=9)
-
+        #self.conv3 = nn.Conv1d(64, self.vid_dim, kernel_size=19, stride=1, padding=9)
+        
         # Mamba
         self.mambaConfig = MambaConfig(d_model=self.vid_dim, n_layers=2)
         self.mambaModel = Mamba(self.mambaConfig)
@@ -476,7 +477,7 @@ class Articulator_Encoder(nn.Module):
         # LSTM decoder
         self.sequence_model = nn.LSTM(
             input_size=input_dim,
-            hidden_size=128,
+            hidden_size=256,
             num_layers=1,
             batch_first=True,
         )
@@ -485,7 +486,7 @@ class Articulator_Encoder(nn.Module):
         self.relu = nn.ReLU()
 
         # Final classification layer
-        self.classifier = nn.Linear(128, 40)
+        self.classifier = nn.Linear(256, 40)
 
     def forward(self, audio_features, video_features, feat_lengths, x_min, x_max):
         """
@@ -509,11 +510,15 @@ class Articulator_Encoder(nn.Module):
             #5: 0.26225585780008864, 2.706900564995662
             x = (x-x_min)/(x_max-x_min) # [B, 500, 6]
             x = rearrange(x, 'b t d -> b d t') #[B, 6, 500]
-            x = self.relu(self.conv1(x)) #[B, 64, 500]
+            x = self.conv1(x) #[B, 64, 500]
+            x = self.relu(x)
             x = self.pool1(x) #[B, 64, 250]
-            x = self.relu(self.conv2(x)) #[B, 64, 250]
+            x = self.conv2(x) #[B, 64, 250]
+            x = self.relu(x)
+            #x = self.conv3(x)
+            #x = self.relu(x)
             x = rearrange(x, 'b d t -> b t d') # [B, 250, 64]
-            x = self.mambaModel(x) # [B, 250, 64]
+            #x = self.mambaModel(x) # [B, 250, 64]
             #ai_feas = rearrange(x, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
             #x = self.visual_model(ai_feas)
         else:  # multimodal

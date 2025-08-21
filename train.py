@@ -154,8 +154,8 @@ for t in range(epochs):
         file.write(f"Average loss of testing dataset: {avg_loss:>7f}\n")
 
     PER, edits, total = val_per.compute()
-    val_per.save('val_pred.json')
     if PER < best_val_per:
+        val_per.save('val_pred.json')
         best_val_per = PER
         torch.save(finalModel.state_dict(), "best_model.pth")
         print(f"Saved best model at epoch {t+1} with val_loss: {avg_loss:.4f}")
