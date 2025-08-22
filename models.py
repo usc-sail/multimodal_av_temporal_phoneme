@@ -7,7 +7,6 @@ from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Optional, Tuple
-from mambapy.mamba import Mamba, MambaConfig
 from vision_transformer import VisionTransformer, partial
 from einops import rearrange
 
@@ -465,14 +464,12 @@ class Articulator_Encoder(nn.Module):
             input_dim = self.audio_dim + self.vid_dim
 
         # Convolution layers
-        self.conv1 = nn.Conv1d(6, 64, kernel_size=19, stride=1, padding=9)
+        self.conv1 = nn.Conv1d(6, 64, kernel_size=17, stride=1, padding=8)
+        self.batchnorm1 = nn.BatchNorm1d(64)
         self.pool1 = nn.MaxPool1d(2)
-        self.conv2 = nn.Conv1d(64, self.vid_dim, kernel_size=19, stride=1, padding=9)
+        self.conv2 = nn.Conv1d(64, self.vid_dim, kernel_size=17, stride=1, padding=8)
+        self.batchnorm2 = nn.BatchNorm1d(64)
         #self.conv3 = nn.Conv1d(64, self.vid_dim, kernel_size=19, stride=1, padding=9)
-        
-        # Mamba
-        self.mambaConfig = MambaConfig(d_model=self.vid_dim, n_layers=2)
-        self.mambaModel = Mamba(self.mambaConfig)
 
         # LSTM decoder
         self.sequence_model = nn.LSTM(
@@ -484,7 +481,7 @@ class Articulator_Encoder(nn.Module):
 
         # Define relu activation function
         self.relu = nn.ReLU()
-
+        
         # Final classification layer
         self.classifier = nn.Linear(256, 40)
 
@@ -511,14 +508,15 @@ class Articulator_Encoder(nn.Module):
             x = (x-x_min)/(x_max-x_min) # [B, 500, 6]
             x = rearrange(x, 'b t d -> b d t') #[B, 6, 500]
             x = self.conv1(x) #[B, 64, 500]
+            x = self.batchnorm1(x)
             x = self.relu(x)
             x = self.pool1(x) #[B, 64, 250]
             x = self.conv2(x) #[B, 64, 250]
+            x = self.batchnorm2(x)
             x = self.relu(x)
             #x = self.conv3(x)
             #x = self.relu(x)
             x = rearrange(x, 'b d t -> b t d') # [B, 250, 64]
-            #x = self.mambaModel(x) # [B, 250, 64]
             #ai_feas = rearrange(x, 'b t c h w -> (b t) c h w')  # Rearrange to (B*T, C, H, W)
             #x = self.visual_model(ai_feas)
         else:  # multimodal
@@ -542,9 +540,7 @@ class Articulator_Encoder(nn.Module):
         #print(reps.shape)
 
         # Decode with LSTM
-        x, _ = self.sequence_model(x)  # [B, 250, 128]
-
-        #x = torch.cat((x[:,::2,:], x[:,1::2,:]), dim=2)
+        x, _ = self.sequence_model(x)  # [B, 250, 256]
 
         # Final Classification
         logits = self.classifier(x)  # [B, 250, 40]
