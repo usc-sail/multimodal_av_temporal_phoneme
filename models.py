@@ -464,7 +464,7 @@ class Articulator_Encoder(nn.Module):
             input_dim = self.audio_dim + self.vid_dim
 
         # Convolution layers
-        self.conv1 = nn.Conv1d(6, 64, kernel_size=17, stride=1, padding=8)
+        self.conv1 = nn.Conv1d(6, 64, kernel_size=15, stride=1, padding=7)
         self.batchnorm1 = nn.BatchNorm1d(64)
         self.pool1 = nn.MaxPool1d(2)
         self.conv2 = nn.Conv1d(64, self.vid_dim, kernel_size=17, stride=1, padding=8)
